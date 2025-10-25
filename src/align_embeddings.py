@@ -12,12 +12,13 @@ Outputs:
 
 Usage example:
 python src/align_embeddings.py \
-  --src_emb_csv data/src_vocab.csv \
-  --tgt_emb_csv data/tgt_vocab.csv \
-  --align_pairs_csv data/lexicon_train.csv \
-  --eval_pairs_csv data/lexicon_test.csv \
-  --proj_dir results/models_demo \
-  --output_dir results/alignment \
+  --src_emb_csv ../data/src_vocab.csv \
+  --tgt_emb_csv ../data/tgt_vocab.csv \
+  --align_pairs_csv ../data/lexicon_train.csv \
+  --eval_pairs_csv ../data/lexicon_test.csv \
+  --proj_dir ../results/models_demo \
+  --output_dir ../results/alignment \
+  --src_max_len 16 --tgt_max_len 16 \
   --topk 5 --use_faiss
 """
 

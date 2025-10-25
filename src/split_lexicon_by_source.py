@@ -3,7 +3,7 @@ import pandas as pd
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 
-lex_path = "E:/RESEARCH/NUS/multilingual_llm/translation-vn-bahna/data/lexicon.csv"
+lex_path = "../data/lexicon.csv"
 out_train = "../data/lexicon_train.csv"
 out_test  = "../data/lexicon_test.csv"
 test_size = 0.2

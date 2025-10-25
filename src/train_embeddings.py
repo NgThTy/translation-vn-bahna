@@ -13,8 +13,12 @@ python train_embeddings.py \
 --train_csv ../data/train.csv \
 --src_model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
 --tgt_model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+--projection_dim 256 \
+--freeze_base False \
 --output_dir ../results/models_demo \
---epochs 1 --batch_size 8 --lr 2e-4
+--epochs 1 --batch_size 8 --lr 2e-4 \
+--src_max_len 256 --tgt_max_len 256 \
+--output_dir ../results/models/translation-vn-bahna
 Requirements (from requirements.txt):
 - torch transformers sentence-transformers pandas tqdm
 
@@ -141,12 +145,6 @@ def build_models(src_model_name, tgt_model_name, proj_dim, freeze_base, device):
     return src, tgt
 
 
-
-
-
-
-
-
 # Use a robust tqdm that counts batches
 def _make_pbar(iterable, desc):
     total = len(iterable)  # number of batches
@@ -159,17 +157,6 @@ def _make_pbar(iterable, desc):
         ncols=100,
         disable=not sys.stdout.isatty(),
     )
-
-
-
-
-
-
-
-
-
-
-
 
 
 def train_one_epoch(src_model, tgt_model, dataloader, optimizer, device, scheduler=None, max_grad_norm=None):
@@ -202,6 +189,7 @@ def train_one_epoch(src_model, tgt_model, dataloader, optimizer, device, schedul
 
     return total_loss / max(1, len(dataloader))
 
+
 @torch.no_grad()
 def evaluate(src_model, tgt_model, dataloader, device):
     src_model.eval()
@@ -218,16 +206,6 @@ def evaluate(src_model, tgt_model, dataloader, device):
             pbar.set_postfix(loss=f"{total_loss/step:.4f}")
 
     return total_loss / max(1, len(dataloader))
-
-
-
-
-
-
-
-
-
-
 
 
 def save_models(src_model, tgt_model, out_dir: str, save_base: bool = False):
@@ -342,12 +320,12 @@ if __name__ == "__main__":
     parser.add_argument("--projection_dim", type=int, default=256, help="dimension of projection head output")
     parser.add_argument("--freeze_base", action="store_true", help="freeze pretrained base model weights (only train projection)")
     parser.add_argument("--save_base", action="store_true", help="save base models at the end if they were fine-tuned")
-    parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--src_max_len", type=int, default=16)
-    parser.add_argument("--tgt_max_len", type=int, default=16)
-    parser.add_argument("--output_dir", type=str, default="results/models/translation-vn-bahna")
+    parser.add_argument("--src_max_len", type=int, default=256)
+    parser.add_argument("--tgt_max_len", type=int, default=256)
+    parser.add_argument("--output_dir", type=str, default="../results/models/translation-vn-bahna")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_cuda", action="store_true", help="do not use cuda even if available")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="max grad norm for clipping (optional)")
