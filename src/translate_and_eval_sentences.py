@@ -226,6 +226,7 @@ if __name__ == "__main__":
     ap.add_argument("--tgt_max_len", type=int, default=128)
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--output_dir", default="results/sent_eval")
+    ap.add_argument("--output_dir", default="../results/sent_eval")
     ap.add_argument("--use_idf_pool", action="store_true", help="Use IDF-weighted token pooling")
     ap.add_argument("--use_csls", action="store_true", help="Use CSLS retrieval")
     ap.add_argument("--csls_k", type=int, default=10, help="Neighborhood size for CSLS")

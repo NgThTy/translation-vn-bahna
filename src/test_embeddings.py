@@ -5,7 +5,7 @@ from train_embeddings import BahVnPairsDataset, collate_fn, build_models, evalua
 
 # --- paths and params ---
 test_csv = "../data/test.csv"
-output_dir = "results/models_demo"
+output_dir = "../results/models_demo"
 src_model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 tgt_model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

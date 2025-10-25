@@ -329,7 +329,7 @@ if __name__ == "__main__":
     # Fine-tuned heads
     parser.add_argument("--proj_dir", required=True, help="Directory containing src_proj.pt and tgt_proj.pt")
     # I/O and knobs
-    parser.add_argument("--output_dir", default="results/alignment", help="where to save R,t and outputs")
+    parser.add_argument("--output_dir", default="../results/alignment", help="where to save R,t and outputs")
     parser.add_argument("--src_max_len", type=int, default=16)
     parser.add_argument("--tgt_max_len", type=int, default=16)
     parser.add_argument("--batch_size", type=int, default=64)
