@@ -44,7 +44,7 @@ Required columns:
 
 ## Windows setup
 1. Install Python 3.12.7 (add “Add python.exe to PATH”). 
-2. Open PowerShell in the repo root (Shift + Right-click → Open PowerShell window here). 
+2. Open PowerShell in the repo root.
 3. Create & activate a virtual environment \
 `python -m venv .venv` \
 `.\.venv\Scripts\Activate.ps1`
