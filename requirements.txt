@@ -30,3 +30,6 @@ typing-extensions==4.12.2
 
 # Compute bleu and chrf
 sacrebleu==2.5.1
+
+# LoRA
+peft==0.17.1
