@@ -33,6 +33,8 @@ import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModel, AutoConfig
 
+from peft import PeftModel
+
 LOGGER = logging.getLogger("align_embeddings")
 
 # -----------------------
@@ -238,6 +240,15 @@ def evaluate_with_lexicon(
     denom = max(1, counted)
     return {"P@1": p1 / denom, f"P@{topk_k}": pK / denom, "MRR": rr_sum / denom}
 
+def maybe_load_lora_into_base(base_model, adapters_dir: str):
+    """If adapters_dir exists and contains PEFT weights, wrap base_model with PeftModel."""
+    if adapters_dir and Path(adapters_dir).is_dir():
+        base_model = PeftModel.from_pretrained(base_model, adapters_dir)
+        base_model.eval()
+    return base_model
+
+def _count_trainable(m):
+    return sum(p.numel() for p in m.parameters() if p.requires_grad)
 
 
 # -----------------------
@@ -253,6 +264,18 @@ def main(args):
     tgt_tok = AutoTokenizer.from_pretrained(args.tgt_model)
     src_base = AutoModel.from_pretrained(args.src_model)
     tgt_base = AutoModel.from_pretrained(args.tgt_model)
+    if args.use_lora:
+        src_adapters = Path(args.proj_dir) / "src_adapters"
+        tgt_adapters = Path(args.proj_dir) / "tgt_adapters"
+        src_base = maybe_load_lora_into_base(src_base, str(src_adapters))
+        tgt_base = maybe_load_lora_into_base(tgt_base, str(tgt_adapters))
+
+    LOGGER.info(
+        f"Trainable params — "
+        f"src_base:{_count_trainable(src_base)} "
+        f"tgt_base:{_count_trainable(tgt_base)} "
+        f"(should be 0 for eval)"
+    )
 
     # Hidden sizes
     src_hidden = getattr(src_base.config, "hidden_size", getattr(src_base.config, "dim", None))
@@ -337,7 +360,10 @@ if __name__ == "__main__":
     parser.add_argument("--topk", type=int, default=5)
     parser.add_argument("--use_faiss", action="store_true", help="use FAISS for retrieval if installed")
     parser.add_argument("--no_cuda", action="store_true", help="force CPU")
+    # LoRa 
+
     args = parser.parse_args()
+    parser.add_argument("--use_lora", action="store_true", help="Load LoRA adapters from {proj_dir}/src_adapters and {proj_dir}/tgt_adapters if present")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
     main(args)
