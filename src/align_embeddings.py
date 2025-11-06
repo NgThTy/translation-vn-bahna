@@ -361,9 +361,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_faiss", action="store_true", help="use FAISS for retrieval if installed")
     parser.add_argument("--no_cuda", action="store_true", help="force CPU")
     # LoRa 
-
-    args = parser.parse_args()
     parser.add_argument("--use_lora", action="store_true", help="Load LoRA adapters from {proj_dir}/src_adapters and {proj_dir}/tgt_adapters if present")
 
+    args = parser.parse_args()
+    
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
     main(args)

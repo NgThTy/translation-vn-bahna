@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModel
+from peft import PeftModel
 
 LOGGER = logging.getLogger("translate_eval")
 
@@ -28,6 +29,19 @@ def load_head(path, hidden_size, device):
     head.load_state_dict(sd, strict=True)
     head.eval()
     return head, out_dim
+
+
+def maybe_load_lora_into_base(base_model, adapters_dir: str):
+    """If adapters_dir exists and contains PEFT weights, wrap base_model with PeftModel."""
+    adir = Path(adapters_dir)
+    if adir.is_dir():
+        base_model = PeftModel.from_pretrained(base_model, str(adir))
+        base_model.eval()
+    return base_model
+
+def _count_trainable(m):
+    return sum(p.numel() for p in m.parameters() if p.requires_grad)
+
 
 def build_idf(tok, texts, max_len=128):
     """
@@ -152,6 +166,13 @@ def main(args):
     tgt_tok = AutoTokenizer.from_pretrained(args.tgt_model)
     src_base = AutoModel.from_pretrained(args.src_model)
     tgt_base = AutoModel.from_pretrained(args.tgt_model)
+    if args.use_lora:
+        src_base = maybe_load_lora_into_base(src_base, Path(args.proj_dir) / "src_adapters")
+        tgt_base = maybe_load_lora_into_base(tgt_base, Path(args.proj_dir) / "tgt_adapters")
+    LOGGER.info(
+        f"Trainable params — src_base:{_count_trainable(src_base)} "
+        f"tgt_base:{_count_trainable(tgt_base)} (should be 0 for eval)"
+    )
     src_hidden = getattr(src_base.config, "hidden_size", getattr(src_base.config, "dim", None))
     tgt_hidden = getattr(tgt_base.config, "hidden_size", getattr(tgt_base.config, "dim", None))
     src_head, proj_dim = load_head(Path(args.proj_dir) / "src_proj.pt", src_hidden, device)
@@ -230,5 +251,6 @@ if __name__ == "__main__":
     ap.add_argument("--use_csls", action="store_true", help="Use CSLS retrieval")
     ap.add_argument("--csls_k", type=int, default=10, help="Neighborhood size for CSLS")
     ap.add_argument("--no_cuda", action="store_true")
+    ap.add_argument("--use_lora", action="store_true", help="Load LoRA adapters from {proj_dir}/src_adapters and {proj_dir}/tgt_adapters if present")
     args = ap.parse_args()
     main(args)
