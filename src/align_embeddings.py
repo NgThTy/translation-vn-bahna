@@ -26,6 +26,7 @@ import argparse
 import logging
 from pathlib import Path
 from typing import Tuple, Dict, List
+import platform 
 
 import numpy as np
 import pandas as pd
@@ -41,8 +42,16 @@ LOGGER = logging.getLogger("align_embeddings")
 # Optional FAISS backend
 # -----------------------
 try:
-    import faiss
-    HAS_FAISS = True
+    import faiss  # type: ignore
+    # On Windows, FAISS (libomp) often conflicts with PyTorch/NumPy (libiomp5md)
+    if platform.system() == "Windows":
+        HAS_FAISS = False
+        LOGGER.warning(
+            "FAISS disabled on Windows to avoid OpenMP runtime conflicts; "
+            "falling back to brute-force cosine."
+        )
+    else:
+        HAS_FAISS = True
 except Exception:
     HAS_FAISS = False
 

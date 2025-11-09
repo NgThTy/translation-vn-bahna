@@ -1,0 +1,3 @@
+lexicon: 1000 pairs
+loss function: InfoNCE
+lora: true
