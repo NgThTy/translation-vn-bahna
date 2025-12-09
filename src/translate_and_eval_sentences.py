@@ -220,20 +220,63 @@ def main(args):
     # Eval
     gold = vn
     top1_acc = sum(p == g for p, g in zip(preds, gold)) / max(1, len(gold))
+    # BLEU & chrF via sacrebleu
     try:
         import sacrebleu
         bleu = sacrebleu.corpus_bleu(preds, [gold]).score
         chrf = sacrebleu.corpus_chrf(preds, [gold]).score
     except Exception:
         bleu = None; chrf = None
+    
+    # BERTScore (P, R, F1) using contextual embeddings
+    try:
+        from bert_score import score as bert_score
+
+        # preds: list of candidate sentences
+        # gold: list of reference sentences
+        # lang="vi" because our targets are Vietnamese
+        P, R, F1 = bert_score(
+            preds,
+            gold,
+            lang="vi",
+            rescale_with_baseline=True
+        )
+
+        # Convert tensors -> Python lists
+        bert_p_list = P.tolist()
+        bert_r_list = R.tolist()
+        bert_f1_list = F1.tolist()
+
+        # Global scores
+        bert_p = float(P.mean())
+        bert_r = float(R.mean())
+        bert_f1 = float(F1.mean())
+    except Exception as e:
+        LOGGER.warning(f"Could not compute BERTScore: {e}")
+        bert_p_list = bert_r_list = bert_f1_list = []
+        bert_p = bert_r = bert_f1 = None
 
     print({"Top1_acc": round(top1_acc, 4),
            "BLEU": None if bleu is None else round(bleu, 2),
-           "chrF": None if chrf is None else round(chrf, 2)})
+           "chrF": None if chrf is None else round(chrf, 2),
+           "BERTScore_P": None if bert_p is None else round(bert_p, 4),
+           "BERTScore_R": None if bert_r is None else round(bert_r, 4),
+           "BERTScore_F1": None if bert_f1 is None else round(bert_f1, 4),
+           })
 
-    # Save predictions
+    # Save predictions + BERTScore
     out_dir = Path(args.output_dir); out_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"Bahnaric": bah, "Predicted_VN": preds, "Gold_VN": gold}).to_csv(out_dir / "sentence_predictions.csv", index=False)
+    
+    df_out = pd.DataFrame({
+        "Bahnaric": bah,
+        "Predicted_VN": preds,
+        "Gold_VN": gold,
+        "BERTScore_P": bert_p_list if bert_p_list else [None] * len(bah),
+        "BERTScore_R": bert_r_list if bert_r_list else [None] * len(bah),
+        "BERTScore_F1": bert_f1_list if bert_f1_list else [None] * len(bah),
+    })
+
+    df_out.to_csv(out_dir / "sentence_predictions.csv", index=False)
     print(f"Saved predictions to {out_dir/'sentence_predictions.csv'}")
 
 if __name__ == "__main__":
