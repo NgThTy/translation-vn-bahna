@@ -1,0 +1,1 @@
+saved_at: /home/n/ntasang/translation-vn-bahna/models/translation-vn-bahna-20epochs
