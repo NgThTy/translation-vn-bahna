@@ -1,8 +1,9 @@
 import argparse
 import os
+import logging
 import torch
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer
 from peft import PeftModel
 
 # Reuse dataset, collate, builders, and evaluate from train file
@@ -13,6 +14,9 @@ from train_embeddings import (
     evaluate,
 )
 
+LOGGER = logging.getLogger("test_embeddings")
+
+
 def maybe_load_lora_into_base(base_model, adapters_dir: str):
     """
     If adapters_dir exists and contains PEFT weights, wrap base_model with PeftModel.
@@ -22,10 +26,15 @@ def maybe_load_lora_into_base(base_model, adapters_dir: str):
         base_model.eval()
     return base_model
 
+
+def _count_trainable(m):
+    return sum(p.numel() for p in m.parameters() if p.requires_grad)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--test_csv", default="../data/test.csv")
-    ap.add_argument("--output_dir", default="../results/models_demo")
+    ap.add_argument("--output_dir", default="../results/models_demo", help="Directory containing src_proj.pt/tgt_proj.pt and optional adapters/")
     ap.add_argument("--src_model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     ap.add_argument("--tgt_model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     ap.add_argument("--projection_dim", type=int, default=256)
@@ -39,12 +48,16 @@ def main():
     ap.add_argument("--no_cuda", action="store_true")
     args = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
+
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    LOGGER.info(f"Using device: {device}")
 
     # --- load dataset + tokenizers ---
     test_ds = BahVnPairsDataset(args.test_csv)
     src_tok = AutoTokenizer.from_pretrained(args.src_model)
     tgt_tok = AutoTokenizer.from_pretrained(args.tgt_model)
+
     test_loader = DataLoader(
         test_ds,
         batch_size=args.batch_size,
@@ -63,15 +76,31 @@ def main():
     # --- load projection heads ---
     src_head_path = os.path.join(args.output_dir, "src_proj.pt")
     tgt_head_path = os.path.join(args.output_dir, "tgt_proj.pt")
+    if not os.path.isfile(src_head_path) or not os.path.isfile(tgt_head_path):
+        raise FileNotFoundError(f"Missing projection heads in {args.output_dir} (expected src_proj.pt and tgt_proj.pt)")
+
     src_model.proj.load_state_dict(torch.load(src_head_path, map_location=device))
     tgt_model.proj.load_state_dict(torch.load(tgt_head_path, map_location=device))
 
     # --- (optional) load LoRA adapters, if saved by train_embeddings.py ---
-    # They would be in: {output_dir}/src_adapters and {output_dir}/tgt_adapters
-    if args.use_lora or os.path.isdir(os.path.join(args.output_dir, "src_adapters")):
-        src_model.base = maybe_load_lora_into_base(src_model.base, os.path.join(args.output_dir, "src_adapters"))
-    if args.use_lora or os.path.isdir(os.path.join(args.output_dir, "tgt_adapters")):
-        tgt_model.base = maybe_load_lora_into_base(tgt_model.base, os.path.join(args.output_dir, "tgt_adapters"))
+    src_adir = os.path.join(args.output_dir, "src_adapters")
+    tgt_adir = os.path.join(args.output_dir, "tgt_adapters")
+
+    if args.use_lora or os.path.isdir(src_adir):
+        LOGGER.info(f"Loading src LoRA adapters from: {src_adir}")
+        src_model.base = maybe_load_lora_into_base(src_model.base, src_adir)
+    if args.use_lora or os.path.isdir(tgt_adir):
+        LOGGER.info(f"Loading tgt LoRA adapters from: {tgt_adir}")
+        tgt_model.base = maybe_load_lora_into_base(tgt_model.base, tgt_adir)
+
+    LOGGER.info(
+        "Trainable params (eval sanity) — "
+        f"src_base:{_count_trainable(src_model.base)} "
+        f"tgt_base:{_count_trainable(tgt_model.base)} "
+        f"src_proj:{_count_trainable(src_model.proj)} "
+        f"tgt_proj:{_count_trainable(tgt_model.proj)} "
+        f"(should be 0)"
+    )
 
     # --- evaluate with the chosen loss (defaults to InfoNCE) ---
     with torch.no_grad():
@@ -88,6 +117,7 @@ def main():
         )
 
     print(f"Test {args.loss_type.upper()} loss: {test_loss:.6f}")
+
 
 if __name__ == "__main__":
     main()

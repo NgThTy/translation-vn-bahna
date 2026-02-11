@@ -2,37 +2,34 @@
 Align Bahnaric -> Vietnamese embeddings with supervised Procrustes (Kabsch)
 and evaluate retrieval on a held-out lexicon.
 
-1) Load and apply fine-tuned ProjectionHeads (src_proj.pt, tgt_proj.pt) from --proj_dir.
-2) Use separate lexicons: --align_pairs_csv (train) and --eval_pairs_csv (test).
+Modes:
+1) Default (trained): load and apply ProjectionHeads (src_proj.pt, tgt_proj.pt) from --proj_dir.
+2) Baseline (B1): no training, no files:
+   --baseline_head {identity,random}
+   - identity: projection is identity (requires --proj_dim == hidden_size, e.g., 384 for MiniLM)
+   - random: fixed random linear head hidden_size -> proj_dim (frozen)
+
+Use separate lexicons:
+- --align_pairs_csv (train) for Kabsch
+- --eval_pairs_csv (test) for retrieval evaluation
 
 Outputs:
 - Saves R.npy, t.npy to --output_dir
 - Logs P@1, P@K, MRR on eval lexicon
 - Saves a sample predictions CSV
-
-Usage example:
-python src/align_embeddings.py \
-  --src_emb_csv ../data/src_vocab.csv \
-  --tgt_emb_csv ../data/tgt_vocab.csv \
-  --align_pairs_csv ../data/lexicon_train.csv \
-  --eval_pairs_csv ../data/lexicon_test.csv \
-  --proj_dir ../results/models_demo \
-  --output_dir ../results/alignment \
-  --src_max_len 16 --tgt_max_len 16 \
-  --topk 5 --use_faiss
 """
 
 import argparse
 import logging
 from pathlib import Path
 from typing import Tuple, Dict, List
-import platform 
+import platform
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from transformers import AutoTokenizer, AutoModel, AutoConfig
+from transformers import AutoTokenizer, AutoModel
 
 from peft import PeftModel
 
@@ -43,7 +40,6 @@ LOGGER = logging.getLogger("align_embeddings")
 # -----------------------
 try:
     import faiss  # type: ignore
-    # On Windows, FAISS (libomp) often conflicts with PyTorch/NumPy (libiomp5md)
     if platform.system() == "Windows":
         HAS_FAISS = False
         LOGGER.warning(
@@ -73,20 +69,53 @@ class ProjectionHead(nn.Module):
         return self.net(x)
 
 
+class IdentityHead(nn.Module):
+    def forward(self, x):
+        return x
+
+
+def make_baseline_head(hidden_size: int, out_dim: int, mode: str, seed: int = 42) -> nn.Module:
+    """
+    mode:
+      - "identity": only valid if out_dim == hidden_size
+      - "random": fixed random linear map hidden_size -> out_dim (frozen)
+    """
+    if mode == "identity":
+        if out_dim != hidden_size:
+            raise ValueError(
+                f"identity head requires out_dim==hidden_size (got {out_dim} vs {hidden_size})"
+            )
+        return IdentityHead()
+    elif mode == "random":
+        torch.manual_seed(seed)
+        head = nn.Linear(hidden_size, out_dim, bias=True)
+        for p in head.parameters():
+            p.requires_grad = False
+        return head
+    else:
+        raise ValueError(f"Unknown baseline_head: {mode}")
+
+
 def _infer_proj_dims_from_state_dict(sd: Dict[str, torch.Tensor]) -> Tuple[int, int]:
     """Return (in_dim, out_dim) from a saved ProjectionHead state_dict."""
-    # 'net.0.weight' has shape [out_dim, in_dim]
-    w = sd["net.0.weight"]
+    w = sd["net.0.weight"]  # [out_dim, in_dim]
     out_dim, in_dim = w.shape[0], w.shape[1]
     return in_dim, out_dim
 
 
-def load_projection_head(path: Path, hidden_size: int, dropout: float = 0.1, device: torch.device = torch.device("cpu")) -> ProjectionHead:
+def load_projection_head(
+    path: Path,
+    hidden_size: int,
+    dropout: float = 0.1,
+    device: torch.device = torch.device("cpu"),
+) -> ProjectionHead:
     sd = torch.load(path, map_location=device)
     in_dim_sd, out_dim = _infer_proj_dims_from_state_dict(sd)
     if in_dim_sd != hidden_size:
-        LOGGER.warning(f"[{path.name}] state_dict in_dim={in_dim_sd} != base hidden_size={hidden_size}. "
-                       f"Using hidden_size={hidden_size}; load_state_dict should still work if shapes match.")
+        LOGGER.warning(
+            f"[{path.name}] state_dict in_dim={in_dim_sd} != base hidden_size={hidden_size}. "
+            f"Using hidden_size={hidden_size}; load_state_dict should still work if shapes match."
+        )
     head = ProjectionHead(in_dim=hidden_size, out_dim=out_dim, dropout=dropout).to(device)
     head.load_state_dict(sd, strict=True)
     head.eval()
@@ -101,7 +130,7 @@ def compute_embeddings_from_csv(
     csv_path: str,
     tokenizer,
     base_model: AutoModel,
-    proj_head: ProjectionHead,
+    proj_head: nn.Module,
     device: torch.device,
     max_len: int = 16,
     batch_size: int = 64,
@@ -119,7 +148,13 @@ def compute_embeddings_from_csv(
     embs = []
     for i in range(0, len(texts), batch_size):
         batch_texts = texts[i : i + batch_size]
-        inputs = tokenizer(batch_texts, padding=True, truncation=True, max_length=max_len, return_tensors="pt").to(device)
+        inputs = tokenizer(
+            batch_texts,
+            padding=True,
+            truncation=True,
+            max_length=max_len,
+            return_tensors="pt",
+        ).to(device)
         outs = base_model(**inputs, return_dict=True)
         last = outs.last_hidden_state  # (B, T, H)
         mask = inputs["attention_mask"].unsqueeze(-1)  # (B, T, 1)
@@ -193,6 +228,7 @@ def load_lexicon(lexicon_csv: str) -> Dict[str, set]:
         lex.setdefault(s, set()).add(t)
     return lex
 
+
 def build_pair_matrices(
     align_pairs_csv: str,
     src_words: List[str],
@@ -219,13 +255,14 @@ def build_pair_matrices(
     Y = np.vstack(Y_list)
     return X, Y, used
 
+
 def evaluate_with_lexicon(
     eval_pairs_csv: str,
     src_words: List[str],
     tgt_words: List[str],
     topk_idx: np.ndarray,
 ) -> Dict[str, float]:
-    lex = load_lexicon(eval_pairs_csv)   # <-- reuse helper
+    lex = load_lexicon(eval_pairs_csv)
 
     topk_k = topk_idx.shape[1] if topk_idx.ndim == 2 else 0
     p1 = pK = 0
@@ -249,12 +286,14 @@ def evaluate_with_lexicon(
     denom = max(1, counted)
     return {"P@1": p1 / denom, f"P@{topk_k}": pK / denom, "MRR": rr_sum / denom}
 
+
 def maybe_load_lora_into_base(base_model, adapters_dir: str):
     """If adapters_dir exists and contains PEFT weights, wrap base_model with PeftModel."""
     if adapters_dir and Path(adapters_dir).is_dir():
         base_model = PeftModel.from_pretrained(base_model, adapters_dir)
         base_model.eval()
     return base_model
+
 
 def _count_trainable(m):
     return sum(p.numel() for p in m.parameters() if p.requires_grad)
@@ -268,12 +307,20 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     LOGGER.info(f"Using device: {device}")
 
+    # In baseline mode, LoRA should be off (no fine-tuning).
+    if args.baseline_head != "none" and args.use_lora:
+        LOGGER.warning("baseline_head != none: disabling --use_lora (baseline should use pretrained encoder only).")
+        args.use_lora = False
+
     # Load base models + tokenizers
     src_tok = AutoTokenizer.from_pretrained(args.src_model)
     tgt_tok = AutoTokenizer.from_pretrained(args.tgt_model)
     src_base = AutoModel.from_pretrained(args.src_model)
     tgt_base = AutoModel.from_pretrained(args.tgt_model)
+
     if args.use_lora:
+        if args.proj_dir is None:
+            raise ValueError("Need --proj_dir to load LoRA adapters.")
         src_adapters = Path(args.proj_dir) / "src_adapters"
         tgt_adapters = Path(args.proj_dir) / "tgt_adapters"
         src_base = maybe_load_lora_into_base(src_base, str(src_adapters))
@@ -292,16 +339,24 @@ def main(args):
     if src_hidden is None or tgt_hidden is None:
         raise ValueError("Cannot determine hidden size from configs.")
 
-    # Load projection heads
-    proj_dir = Path(args.proj_dir)
-    src_proj_path = proj_dir / "src_proj.pt"
-    tgt_proj_path = proj_dir / "tgt_proj.pt"
-    if not src_proj_path.exists() or not tgt_proj_path.exists():
-        raise FileNotFoundError(f"Projection heads not found in {proj_dir} "
-                                f"(expected src_proj.pt and tgt_proj.pt).")
-    src_head = load_projection_head(src_proj_path, hidden_size=src_hidden, dropout=0.1, device=device)
-    tgt_head = load_projection_head(tgt_proj_path, hidden_size=tgt_hidden, dropout=0.1, device=device)
-    LOGGER.info(f"Loaded projection heads from {proj_dir}")
+    # Projection heads (trained vs baseline)
+    if args.baseline_head != "none":
+        src_head = make_baseline_head(src_hidden, args.proj_dim, args.baseline_head, seed=args.seed).to(device).eval()
+        tgt_head = make_baseline_head(tgt_hidden, args.proj_dim, args.baseline_head, seed=args.seed).to(device).eval()
+        LOGGER.info(f"Using baseline head: {args.baseline_head} (proj_dim={args.proj_dim})")
+    else:
+        if args.proj_dir is None:
+            raise ValueError("Need --proj_dir unless --baseline_head is set.")
+        proj_dir = Path(args.proj_dir)
+        src_proj_path = proj_dir / "src_proj.pt"
+        tgt_proj_path = proj_dir / "tgt_proj.pt"
+        if not src_proj_path.exists() or not tgt_proj_path.exists():
+            raise FileNotFoundError(
+                f"Projection heads not found in {proj_dir} (expected src_proj.pt and tgt_proj.pt)."
+            )
+        src_head = load_projection_head(src_proj_path, hidden_size=src_hidden, dropout=0.1, device=device)
+        tgt_head = load_projection_head(tgt_proj_path, hidden_size=tgt_hidden, dropout=0.1, device=device)
+        LOGGER.info(f"Loaded projection heads from {proj_dir}")
 
     # Build embeddings for full vocabularies (projected)
     LOGGER.info("Computing projected embeddings for source/target vocabularies...")
@@ -349,7 +404,9 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Align Bahnaric -> Vietnamese with supervised Procrustes and evaluate on held-out lexicon")
+    parser = argparse.ArgumentParser(
+        description="Align Bahnaric -> Vietnamese with supervised Procrustes and evaluate on held-out lexicon"
+    )
     # Models / tokenizers
     parser.add_argument("--src_model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     parser.add_argument("--tgt_model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
@@ -359,8 +416,22 @@ if __name__ == "__main__":
     # Lexicons (train vs test)
     parser.add_argument("--align_pairs_csv", required=True, help="TRAIN lexicon CSV (Bahnaric,Vietnamese) used to learn R,t")
     parser.add_argument("--eval_pairs_csv", required=True, help="TEST lexicon CSV (Bahnaric,Vietnamese) used ONLY for evaluation")
-    # Fine-tuned heads
-    parser.add_argument("--proj_dir", required=True, help="Directory containing src_proj.pt and tgt_proj.pt")
+    # Fine-tuned heads (optional in baseline mode)
+    parser.add_argument("--proj_dir", default=None, help="Directory containing src_proj.pt and tgt_proj.pt (optional if using --baseline_head)")
+    # Baseline options
+    parser.add_argument(
+        "--baseline_head",
+        choices=["none", "identity", "random"],
+        default="none",
+        help="If != none, do NOT load src_proj.pt/tgt_proj.pt; use a frozen baseline head instead.",
+    )
+    parser.add_argument(
+        "--proj_dim",
+        type=int,
+        default=256,
+        help="Output dim for random baseline head, or for identity must equal hidden size (e.g., 384 for MiniLM).",
+    )
+    parser.add_argument("--seed", type=int, default=42)
     # I/O and knobs
     parser.add_argument("--output_dir", default="../results/alignment", help="where to save R,t and outputs")
     parser.add_argument("--src_max_len", type=int, default=16)
@@ -369,10 +440,14 @@ if __name__ == "__main__":
     parser.add_argument("--topk", type=int, default=5)
     parser.add_argument("--use_faiss", action="store_true", help="use FAISS for retrieval if installed")
     parser.add_argument("--no_cuda", action="store_true", help="force CPU")
-    # LoRa 
-    parser.add_argument("--use_lora", action="store_true", help="Load LoRA adapters from {proj_dir}/src_adapters and {proj_dir}/tgt_adapters if present")
+    # LoRA (trained mode only)
+    parser.add_argument(
+        "--use_lora",
+        action="store_true",
+        help="Load LoRA adapters from {proj_dir}/src_adapters and {proj_dir}/tgt_adapters if present (ignored in baseline mode).",
+    )
 
     args = parser.parse_args()
-    
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
     main(args)

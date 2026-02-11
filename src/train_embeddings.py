@@ -1,22 +1,31 @@
 """
-Fine-tune Bahnaric -> Vietnamese projection heads.
+Fine-tune Bahnaric -> Vietnamese embedding projection heads (lexical mapping).
 
-Now supports:
+Supports:
 - Contrastive InfoNCE with in-batch negatives (symmetric).
 - MSE, InfoNCE, or Hybrid losses via --loss_type.
 - Per-epoch logging: grad norms, mean seq lengths, truncation rate.
-- Safely uses .item() for scalar logging.
+- LoRA adapters for base encoders (FEATURE_EXTRACTION).
+- Auto LoRA target-module resolver for XLM-R/RoBERTa vs BERT-like encoders.
 
-Example:
-python train_embeddings.py \
-  --train_csv ../data/train.csv \
-  --src_model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
-  --tgt_model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+Notes for baselines:
+- (B2) XLM-R encoder baseline: set --src_model xlm-roberta-base --tgt_model xlm-roberta-base --use_lora
+  LoRA target modules are auto-selected if you do not pass --lora_target_modules.
+
+Example (lexical mapping training):
+python src/train_embeddings.py \
+  --train_csv data/train.csv \
+  --valid_csv data/valid.csv \
+  --src_model xlm-roberta-base \
+  --tgt_model xlm-roberta-base \
   --projection_dim 256 \
-  --freeze_base \
-  --epochs 3 --batch_size 64 --lr 2e-4 \
-  --src_max_len 256 --tgt_max_len 256 \
-  --loss_type infonce --temperature 0.05
+  --epochs 1 \
+  --batch_size 64 \
+  --lr 2e-4 \
+  --src_max_len 256 \
+  --tgt_max_len 256 \
+  --use_lora \
+  --output_dir results/models/b2_xlmr
 """
 
 import os
@@ -24,7 +33,7 @@ import argparse
 import random
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -138,27 +147,98 @@ def build_models(src_model_name, tgt_model_name, proj_dim, freeze_base, device):
     return src, tgt
 
 
+# -----------------------
+# LoRA helpers (B2-ready)
+# -----------------------
+def _infer_model_type_from_module(model) -> str:
+    # Best-effort: config.model_type is usually reliable.
+    cfg = getattr(model, "config", None)
+    mt = getattr(cfg, "model_type", None) if cfg is not None else None
+    if isinstance(mt, str) and mt:
+        return mt.lower()
+    # Fallback: class name
+    return model.__class__.__name__.lower()
+
+
+def _auto_lora_target_modules(base_model, args) -> List[str]:
+    """
+    Decide LoRA target module name substrings.
+    - For XLM-R / RoBERTa: q_proj, k_proj, v_proj, out_proj, fc1, fc2
+    - For BERT-ish (incl MiniLM): query, key, value, dense
+    """
+    # Allow user override via CLI.
+    if args.lora_target_modules is not None:
+        return list(args.lora_target_modules)
+
+    model_type = _infer_model_type_from_module(base_model)
+    model_name = (getattr(args, "src_model", "") or "") + " " + (getattr(args, "tgt_model", "") or "")
+    model_name = model_name.lower()
+
+    if ("xlm-roberta" in model_name) or ("xlm-roberta" in model_type) or ("roberta" in model_type):
+        return ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"]
+    return ["query", "key", "value", "dense"]
+
+
+def _has_any_lora_params(peft_model) -> bool:
+    for n, _ in peft_model.named_parameters():
+        if "lora_" in n:
+            return True
+    return False
+
+
+def _count_matching_modules(base_model, patterns: List[str]) -> int:
+    """
+    Count how many module names contain any of the substrings in patterns.
+    This is a crude but helpful sanity check before building LoRA.
+    """
+    names = [n for n, _ in base_model.named_modules()]
+    cnt = 0
+    for nm in names:
+        if any(pat in nm for pat in patterns):
+            cnt += 1
+    return cnt
+
+
 def apply_lora_if_needed(base_model, args):
     if not args.use_lora:
         return base_model
+
+    target_modules = _auto_lora_target_modules(base_model, args)
+    match_cnt = _count_matching_modules(base_model, target_modules)
+    if match_cnt == 0:
+        LOGGER.warning(
+            "LoRA target_modules did not match any submodules. "
+            f"target_modules={target_modules}. "
+            "This will likely attach LoRA to nothing."
+        )
 
     lora_cfg = LoraConfig(
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
-        target_modules=args.lora_target_modules,
+        target_modules=target_modules,
         bias="none",
-        task_type="FEATURE_EXTRACTION",  # encoders used for embeddings
+        task_type="FEATURE_EXTRACTION",
     )
     peft_model = get_peft_model(base_model, lora_cfg)
 
-    # Safety pass: LoRA params should already be trainable, others frozen.
-    # We still enforce it explicitly:
+    # Enforce: only LoRA params trainable (base frozen).
     for name, p in peft_model.named_parameters():
         if "lora_" in name:
             p.requires_grad = True
         else:
             p.requires_grad = False
+
+    if not _has_any_lora_params(peft_model):
+        # Loud failure: user requested LoRA but none were created.
+        raise RuntimeError(
+            "Requested --use_lora but no LoRA parameters were created. "
+            f"Resolved target_modules={target_modules}. "
+            "Fix by passing an explicit --lora_target_modules matching your backbone (e.g., "
+            "for XLM-R: q_proj k_proj v_proj out_proj fc1 fc2)."
+        )
+
+    LOGGER.info(f"LoRA enabled. target_modules={target_modules} (matched_submodules={match_cnt})")
     return peft_model
 
 
@@ -176,7 +256,6 @@ def _make_pbar(iterable, desc):
 
 
 # -------- Losses --------
-
 def mse_loss(src_emb, tgt_emb):
     return F.mse_loss(src_emb, tgt_emb, reduction="mean")
 
@@ -190,29 +269,22 @@ def infonce_loss(src_emb, tgt_emb, temperature: float = 0.07):
     tgt = F.normalize(tgt_emb, p=2, dim=-1)
     logits = torch.matmul(src, tgt.t()) / max(1e-6, temperature)  # (B, B)
     labels = torch.arange(src.size(0), device=src.device)
-
     loss_src = F.cross_entropy(logits, labels)      # src -> tgt
     loss_tgt = F.cross_entropy(logits.t(), labels)  # tgt -> src
     return 0.5 * (loss_src + loss_tgt)
 
 
 def hybrid_loss(src_emb, tgt_emb, temperature: float, alpha: float):
-    """
-    alpha * InfoNCE + (1 - alpha) * MSE
-    """
+    """alpha * InfoNCE + (1 - alpha) * MSE"""
     return alpha * infonce_loss(src_emb, tgt_emb, temperature) + (1 - alpha) * mse_loss(src_emb, tgt_emb)
 
 
 # -------- Training / Eval --------
-
 def _batch_seq_stats(src_inputs, tgt_inputs, src_max_len, tgt_max_len):
-    # mean lengths and crude truncation rate (length == max_len implies likely truncation)
     src_len = src_inputs["attention_mask"].sum(dim=1).float()
     tgt_len = tgt_inputs["attention_mask"].sum(dim=1).float()
-
     src_trunc = (src_len >= float(src_max_len)).float()
     tgt_trunc = (tgt_len >= float(tgt_max_len)).float()
-
     return {
         "src_mean_len": src_len.mean().item(),
         "tgt_mean_len": tgt_len.mean().item(),
@@ -223,7 +295,7 @@ def _batch_seq_stats(src_inputs, tgt_inputs, src_max_len, tgt_max_len):
 
 def _log_grad_norms(model: nn.Module, tag: str):
     norms = []
-    for n, p in model.named_parameters():
+    for _, p in model.named_parameters():
         if p.grad is not None and p.requires_grad:
             norms.append(p.grad.norm().detach())
     if norms:
@@ -244,7 +316,7 @@ def train_one_epoch(
     max_grad_norm=None,
     loss_type: str = "infonce",
     temperature: float = 0.07,
-    alpha: float = 0.5,  # for hybrid
+    alpha: float = 0.5,
     src_max_len: int = 256,
     tgt_max_len: int = 256,
 ):
@@ -254,7 +326,6 @@ def train_one_epoch(
     total_loss = 0.0
     n_batches = 0
 
-    # running stats for sequence lengths & truncation
     src_len_sum = tgt_len_sum = 0.0
     src_trunc_sum = tgt_trunc_sum = 0.0
     total_samples = 0
@@ -289,7 +360,6 @@ def train_one_epoch(
         total_loss += loss_val
         n_batches += 1
 
-        # seq stats
         stats = _batch_seq_stats(src_inputs, tgt_inputs, src_max_len, tgt_max_len)
         bsz = src_inputs["input_ids"].size(0)
         src_len_sum += stats["src_mean_len"] * bsz
@@ -301,8 +371,7 @@ def train_one_epoch(
         if step % 50 == 0 or step == len(dataloader):
             pbar.set_postfix(loss=f"{(total_loss / n_batches):.4f}")
 
-    # per-epoch logs
-    LOGGER.info(f"Train loss ({loss_type}): { (total_loss / max(1, n_batches)) :.6f}")
+    LOGGER.info(f"Train loss ({loss_type}): {(total_loss / max(1, n_batches)):.6f}")
     if total_samples > 0:
         LOGGER.info(
             "Train seq stats: "
@@ -312,7 +381,6 @@ def train_one_epoch(
             f"tgt_trunc_rate={tgt_trunc_sum/total_samples:.3f}"
         )
 
-    # grad norms (after epoch)
     _log_grad_norms(src_model.proj, "src_proj")
     _log_grad_norms(tgt_model.proj, "tgt_proj")
 
@@ -337,7 +405,6 @@ def evaluate(
     total_loss = 0.0
     n_batches = 0
 
-    # running stats for sequence lengths & truncation
     src_len_sum = tgt_len_sum = 0.0
     src_trunc_sum = tgt_trunc_sum = 0.0
     total_samples = 0
@@ -362,7 +429,6 @@ def evaluate(
         if step % 50 == 0 or step == len(dataloader):
             pbar.set_postfix(loss=f"{(total_loss / n_batches):.4f}")
 
-        # seq stats
         stats = _batch_seq_stats(src_inputs, tgt_inputs, src_max_len, tgt_max_len)
         bsz = src_inputs["input_ids"].size(0)
         src_len_sum += stats["src_mean_len"] * bsz
@@ -371,7 +437,7 @@ def evaluate(
         tgt_trunc_sum += stats["tgt_trunc_rate"] * bsz
         total_samples += bsz
 
-    LOGGER.info(f"Valid loss ({loss_type}): { (total_loss / max(1, n_batches)) :.6f}")
+    LOGGER.info(f"Valid loss ({loss_type}): {(total_loss / max(1, n_batches)):.6f}")
     if total_samples > 0:
         LOGGER.info(
             "Valid seq stats: "
@@ -386,11 +452,10 @@ def evaluate(
 
 def save_models(src_model, tgt_model, out_dir: str, save_base: bool = False):
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    
-    # Projection heads
+
     torch.save(src_model.proj.state_dict(), Path(out_dir) / "src_proj.pt")
     torch.save(tgt_model.proj.state_dict(), Path(out_dir) / "tgt_proj.pt")
-    
+
     # LoRA adapters (if any)
     if hasattr(src_model.base, "save_pretrained"):
         (Path(out_dir) / "src_adapters").mkdir(parents=True, exist_ok=True)
@@ -401,7 +466,7 @@ def save_models(src_model, tgt_model, out_dir: str, save_base: bool = False):
 
     with open(Path(out_dir) / "meta.txt", "w", encoding="utf-8") as f:
         f.write(f"saved_at: {Path(out_dir).absolute()}\n")
-    
+
     if save_base:
         try:
             base_src = getattr(src_model.base, "get_base_model", lambda: src_model.base)()
@@ -414,20 +479,18 @@ def save_models(src_model, tgt_model, out_dir: str, save_base: bool = False):
         except Exception as e:
             LOGGER.warning(f"Could not save tgt base: {e}")
 
+
 def main(args):
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     LOGGER.info(f"Using device: {device}")
 
-    # Load data
     train_ds = BahVnPairsDataset(args.train_csv)
     valid_ds = BahVnPairsDataset(args.valid_csv) if args.valid_csv else None
 
-    # Tokenizers
     src_tokenizer = AutoTokenizer.from_pretrained(args.src_model)
     tgt_tokenizer = AutoTokenizer.from_pretrained(args.tgt_model)
 
-    # DataLoaders
     train_loader = DataLoader(
         train_ds,
         batch_size=args.batch_size,
@@ -440,6 +503,7 @@ def main(args):
             b, src_tokenizer, tgt_tokenizer, args.src_max_len, args.tgt_max_len, device
         ),
     )
+
     valid_loader = None
     if valid_ds:
         valid_loader = DataLoader(
@@ -455,10 +519,9 @@ def main(args):
             ),
         )
 
-    # Build models
     src_model, tgt_model = build_models(args.src_model, args.tgt_model, args.projection_dim, args.freeze_base, device)
-    
-    # Apply LoRA if requested
+
+    # Apply LoRA if requested (auto target modules for XLM-R/RoBERTa if not specified)
     src_model.base = apply_lora_if_needed(src_model.base, args)
     tgt_model.base = apply_lora_if_needed(tgt_model.base, args)
 
@@ -466,22 +529,19 @@ def main(args):
         return sum(p.numel() for p in module.parameters() if p.requires_grad)
 
     LOGGER.info(
-        f"Trainable params — "
+        "Trainable params — "
         f"src_base:{count_trainable(src_model.base)} "
         f"tgt_base:{count_trainable(tgt_model.base)} "
         f"src_proj:{count_trainable(src_model.proj)} "
         f"tgt_proj:{count_trainable(tgt_model.proj)}"
     )
 
-    # Collect parameters to optimize
     optim_params = list(src_model.proj.parameters()) + list(tgt_model.proj.parameters())
 
-    # If LoRA is on, add ONLY LoRA adapter params (the only base params with requires_grad=True)
     if args.use_lora:
         optim_params += [p for _, p in src_model.base.named_parameters() if p.requires_grad]
         optim_params += [p for _, p in tgt_model.base.named_parameters() if p.requires_grad]
     else:
-        # Fallback: allow full-base finetune only if user explicitly disables freeze
         if not args.freeze_base:
             optim_params += [p for p in src_model.base.parameters() if p.requires_grad]
             optim_params += [p for p in tgt_model.base.parameters() if p.requires_grad]
@@ -531,12 +591,12 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--src_max_len", type=int, default=256)
     parser.add_argument("--tgt_max_len", type=int, default=256)
-    parser.add_argument("--output_dir", type=str, default="../results/models/translation-vn-bahna")
+    parser.add_argument("--output_dir", type=str, default="../results/models/lexmap-vn-bahna")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_cuda", action="store_true")
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
 
-    # NEW: loss control
+    # loss control
     parser.add_argument("--loss_type", choices=["mse", "infonce", "hybrid"], default="infonce")
     parser.add_argument("--temperature", type=float, default=0.07, help="InfoNCE temperature")
     parser.add_argument("--alpha", type=float, default=0.5, help="Hybrid weight: alpha*InfoNCE + (1-alpha)*MSE")
@@ -550,8 +610,17 @@ if __name__ == "__main__":
     parser.add_argument("--lora_r", type=int, default=8)
     parser.add_argument("--lora_alpha", type=float, default=16.0)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
-    parser.add_argument("--lora_target_modules", nargs="+", default=["query", "key", "value", "dense"], help="Module name substrings to apply LoRA to (depends on model)")
 
+    # IMPORTANT: default=None enables auto-resolve for XLM-R / RoBERTa vs BERT-like
+    parser.add_argument(
+        "--lora_target_modules",
+        nargs="+",
+        default=None,
+        help=(
+            "Module name substrings to apply LoRA to. If omitted, auto-selects based on backbone "
+            "(XLM-R/RoBERTa: q_proj k_proj v_proj out_proj fc1 fc2; BERT-like: query key value dense)."
+        ),
+    )
 
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
