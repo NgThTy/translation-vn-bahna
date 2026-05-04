@@ -1,0 +1,2 @@
+Mapping_type,P@1,MRR,Hit@5,Hit@10,BERTScore_P,BERTScore_R,BERTScore_F1,count
+unknown,0.2859,0.3671,0.4743,0.5657,0.775,0.7765,0.7755,2001
