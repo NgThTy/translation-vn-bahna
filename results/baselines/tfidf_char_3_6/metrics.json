@@ -1,0 +1,21 @@
+{
+  "MRR": 0.3015,
+  "Top1_acc": 0.2594,
+  "Hit@1": 0.2594,
+  "Recall@1": 0.2594,
+  "Precision@1": 0.2594,
+  "Hit@5": 0.3573,
+  "Recall@5": 0.3573,
+  "Precision@5": 0.0715,
+  "Hit@10": 0.3903,
+  "Recall@10": 0.3903,
+  "Precision@10": 0.039,
+  "method": "tfidf_char",
+  "test_csv": "data/test.csv",
+  "num_queries": 2001,
+  "candidate_pool_size": 2001,
+  "ngram_min": 3,
+  "ngram_max": 6,
+  "strip_accents": false,
+  "lowercase": true
+}

@@ -1,0 +1,21 @@
+{
+  "MRR": 0.3293,
+  "Top1_acc": 0.2949,
+  "Hit@1": 0.2949,
+  "Recall@1": 0.2949,
+  "Precision@1": 0.2949,
+  "Hit@5": 0.3778,
+  "Recall@5": 0.3778,
+  "Precision@5": 0.0756,
+  "Hit@10": 0.4043,
+  "Recall@10": 0.4043,
+  "Precision@10": 0.0404,
+  "method": "bm25_char",
+  "test_csv": "data/test.csv",
+  "num_queries": 2001,
+  "candidate_pool_size": 2001,
+  "ngram_min": 3,
+  "ngram_max": 6,
+  "strip_accents": false,
+  "lowercase": true
+}

@@ -1,0 +1,21 @@
+{
+  "MRR": 0.4255,
+  "Top1_acc": 0.4053,
+  "Hit@1": 0.4053,
+  "Recall@1": 0.4053,
+  "Precision@1": 0.4053,
+  "Hit@5": 0.4538,
+  "Recall@5": 0.4538,
+  "Precision@5": 0.0908,
+  "Hit@10": 0.4703,
+  "Recall@10": 0.4703,
+  "Precision@10": 0.047,
+  "method": "levenshtein_ratio",
+  "test_csv": "data/test.csv",
+  "num_queries": 2001,
+  "candidate_pool_size": 2001,
+  "strip_accents": true,
+  "lowercase": true,
+  "remove_punct": true,
+  "remove_spaces": false
+}

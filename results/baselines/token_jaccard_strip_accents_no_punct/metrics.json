@@ -1,0 +1,21 @@
+{
+  "MRR": 0.3773,
+  "Top1_acc": 0.3463,
+  "Hit@1": 0.3463,
+  "Recall@1": 0.3463,
+  "Precision@1": 0.3463,
+  "Hit@5": 0.4178,
+  "Recall@5": 0.4178,
+  "Precision@5": 0.0836,
+  "Hit@10": 0.4348,
+  "Recall@10": 0.4348,
+  "Precision@10": 0.0435,
+  "method": "token_jaccard",
+  "test_csv": "data/test.csv",
+  "num_queries": 2001,
+  "candidate_pool_size": 2001,
+  "strip_accents": true,
+  "lowercase": true,
+  "remove_punct": true,
+  "remove_spaces": false
+}
