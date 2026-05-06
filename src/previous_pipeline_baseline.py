@@ -179,14 +179,40 @@ def load_projection_head(path: Path, hidden_size: int, device: torch.device) -> 
     return head, out_dim
 
 
-def maybe_load_lora(base_model, adapters_dir: Path):
+def maybe_load_lora(base_model, adapters_dir: Path, required: bool = False):
+    """
+    Load PEFT LoRA adapters.
+
+    Important:
+    - For the XLM-R B2 checkpoints, projection heads were trained together with LoRA.
+    - If --use_lora is passed but adapters are missing, we should fail loudly.
+      Otherwise the script evaluates vanilla XLM-R with LoRA-trained projection heads,
+      which gives near-random retrieval.
+    """
     if not adapters_dir.is_dir():
+        if required:
+            raise FileNotFoundError(
+                f"LoRA adapter directory not found: {adapters_dir}\n"
+                "This checkpoint was expected to contain PEFT adapters. "
+                "Check that --proj_dir points to the correct checkpoint folder, e.g. "
+                "results/models/b2_xlmr_50ep"
+            )
         return base_model
+
+    adapter_config = adapters_dir / "adapter_config.json"
+    if required and not adapter_config.exists():
+        raise FileNotFoundError(
+            f"LoRA adapter_config.json not found in: {adapters_dir}\n"
+            "This directory exists, but it does not look like a PEFT LoRA adapter folder."
+        )
 
     if PeftModel is None:
         raise ImportError("peft is not available, but --use_lora was requested.")
 
-    return PeftModel.from_pretrained(base_model, str(adapters_dir))
+    print(f"Loading LoRA adapter from {adapters_dir}")
+    model = PeftModel.from_pretrained(base_model, str(adapters_dir))
+    model.eval()
+    return model
 
 
 def l2_normalize_rows(x: np.ndarray) -> np.ndarray:
@@ -437,9 +463,15 @@ def main(args: argparse.Namespace) -> None:
     proj_dir = Path(args.proj_dir)
 
     if args.use_lora:
-        print("Loading LoRA adapters...")
-        src_base = maybe_load_lora(src_base, proj_dir / "src_adapters")
-        tgt_base = maybe_load_lora(tgt_base, proj_dir / "tgt_adapters")
+        print("Loading LoRA adapters because --use_lora was provided...")
+        src_base = maybe_load_lora(src_base, proj_dir / "src_adapters", required=True)
+        tgt_base = maybe_load_lora(tgt_base, proj_dir / "tgt_adapters", required=True)
+    else:
+        print(
+            "WARNING: --use_lora was NOT provided. "
+            "If this checkpoint was trained with LoRA, retrieval may collapse because "
+            "the projection heads expect LoRA-adapted encoder features."
+        )
 
     src_hidden = get_hidden_size(src_base)
     tgt_hidden = get_hidden_size(tgt_base)
