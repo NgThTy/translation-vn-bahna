@@ -1,1 +1,22 @@
 .venv
+# Large model/checkpoint files
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Saved encoder model folders from full encoder baseline
+results/baselines/full_encoder_*/src_encoder/
+results/baselines/full_encoder_*/tgt_encoder/
+
+# Optional saved encoder folders from LoRA baseline
+results/baselines/lora_contrastive_*/src_encoder/
+results/baselines/lora_contrastive_*/tgt_encoder/
+
+# Runtime logs
+logs/
+
+# LoRA adapter weights from baseline outputs
+results/baselines/lora_contrastive_*/src_adapters/
+results/baselines/lora_contrastive_*/tgt_adapters/
