@@ -1,34 +1,20 @@
 """
-fastText + Procrustes / VecMap-style baseline for Bahnaric -> Vietnamese sentence retrieval.
+Improved fastText + supervised Procrustes / VecMap-style baseline
+for Bahnaric -> Vietnamese sentence retrieval.
 
-Task:
-Given a Bahnaric query sentence, retrieve the correct Vietnamese sentence from a candidate pool.
-For data/test.csv, the gold Vietnamese sentence is assumed to be on the same row as the Bahnaric query.
-
-Pipeline:
-1. Train separate fastText embeddings:
-   - Bahnaric fastText model from Bahnaric-side training text
-   - Vietnamese fastText model from Vietnamese-side training text
-
-2. Learn supervised Procrustes mapping:
-   - Use lexicon_train.csv as seed dictionary
-   - Compute Bahnaric word/phrase embeddings and Vietnamese word/phrase embeddings
-   - Learn orthogonal map R from Bahnaric space to Vietnamese space
-
-3. Sentence retrieval:
-   - Embed each Bahnaric test sentence by averaging fastText word vectors
-   - Map Bahnaric sentence embedding into Vietnamese space
-   - Embed all Vietnamese candidate sentences
-   - Retrieve nearest Vietnamese candidate using cosine or CSLS
-
-This is a non-transformer baseline.
-It tests whether classic word embeddings + linear cross-lingual mapping are competitive.
+Main improvements:
+1. Supports mean and IDF-weighted aggregation.
+2. Supports phrase-level or token-level Procrustes supervision.
+3. Supports applying Procrustes before pooling or after pooling.
+4. Keeps VecMap-style normalization and CSLS retrieval.
 """
 
 import argparse
 import json
+import math
 import re
 import unicodedata
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -44,12 +30,7 @@ except Exception as e:
     ) from e
 
 
-def normalize_text(
-    text: str,
-    lowercase: bool = True,
-    strip_accents: bool = False,
-    remove_punct: bool = False,
-) -> str:
+def normalize_text(text: str, lowercase: bool = True, strip_accents: bool = False, remove_punct: bool = False) -> str:
     text = str(text)
     text = unicodedata.normalize("NFC", text)
 
@@ -86,17 +67,8 @@ def read_parallel_csv(path: str) -> pd.DataFrame:
     return df
 
 
-def build_training_sentences(
-    csv_paths: List[str],
-    side: str,
-    lowercase: bool,
-    strip_accents: bool,
-    remove_punct: bool,
-) -> List[List[str]]:
-    """
-    side must be either 'Bahnaric' or 'Vietnamese'.
-    """
-    all_sents: List[List[str]] = []
+def build_training_sentences(csv_paths: List[str], side: str, lowercase: bool, strip_accents: bool, remove_punct: bool) -> List[List[str]]:
+    all_sents = []
 
     for path in csv_paths:
         if not path:
@@ -123,16 +95,22 @@ def build_training_sentences(
     return all_sents
 
 
-def train_fasttext(
-    sentences: List[List[str]],
-    vector_size: int,
-    window: int,
-    min_count: int,
-    epochs: int,
-    sg: int,
-    workers: int,
-    seed: int,
-) -> FastText:
+def build_idf(sentences: List[List[str]]) -> Dict[str, float]:
+    df_counter = Counter()
+    n_docs = len(sentences)
+
+    for sent in sentences:
+        for tok in set(sent):
+            df_counter[tok] += 1
+
+    idf = {}
+    for tok, df in df_counter.items():
+        idf[tok] = math.log((1.0 + n_docs) / (1.0 + df)) + 1.0
+
+    return idf
+
+
+def train_fasttext(sentences: List[List[str]], vector_size: int, window: int, min_count: int, epochs: int, sg: int, workers: int, seed: int) -> FastText:
     model = FastText(
         vector_size=vector_size,
         window=window,
@@ -153,25 +131,119 @@ def train_fasttext(
     return model
 
 
-def phrase_embedding(model: FastText, text: str) -> np.ndarray:
+def token_matrix(model: FastText, text: str) -> Tuple[List[str], np.ndarray]:
     toks = tokenize(text)
     if not toks:
+        return [], np.zeros((0, model.vector_size), dtype=np.float32)
+
+    vecs = [model.wv[tok] for tok in toks]
+    return toks, np.vstack(vecs).astype(np.float32)
+
+
+def aggregate_matrix(toks: List[str], mat: np.ndarray, pooling: str, idf: Dict[str, float] = None) -> np.ndarray:
+    if mat.shape[0] == 0:
+        return np.zeros(mat.shape[1], dtype=np.float32)
+
+    if pooling == "mean":
+        return mat.mean(axis=0).astype(np.float32)
+
+    if pooling == "idf":
+        weights = np.asarray([float(idf.get(tok, 1.0)) if idf else 1.0 for tok in toks], dtype=np.float32)
+        denom = float(weights.sum())
+        if denom <= 0.0:
+            return mat.mean(axis=0).astype(np.float32)
+        return ((mat * weights[:, None]).sum(axis=0) / denom).astype(np.float32)
+
+    raise ValueError(f"Unknown pooling: {pooling}")
+
+
+def embed_text(
+    model: FastText,
+    text: str,
+    pooling: str,
+    idf: Dict[str, float] = None,
+    r: np.ndarray = None,
+    map_before_pool: bool = False,
+    mu: np.ndarray = None,
+    vecmap_normalize: bool = False,
+) -> np.ndarray:
+    toks, mat = token_matrix(model, text)
+
+    if mat.shape[0] == 0:
         return np.zeros(model.vector_size, dtype=np.float32)
 
-    vecs = []
-    for tok in toks:
-        # Gensim FastText can infer vectors for OOV words through subwords.
-        vecs.append(model.wv[tok])
+    if map_before_pool and r is not None:
+        if vecmap_normalize:
+            mat = normalize_rows(mat)
+            if mu is not None:
+                mat = normalize_rows(mat - mu)
+        mat = mat @ r
 
-    if not vecs:
-        return np.zeros(model.vector_size, dtype=np.float32)
+    emb = aggregate_matrix(toks, mat, pooling=pooling, idf=idf)
 
-    return np.mean(np.vstack(vecs), axis=0).astype(np.float32)
+    return emb.astype(np.float32)
 
 
-def sentence_embeddings(model: FastText, texts: List[str]) -> np.ndarray:
-    embs = [phrase_embedding(model, text) for text in texts]
+def embed_texts(
+    model: FastText,
+    texts: List[str],
+    pooling: str,
+    idf: Dict[str, float] = None,
+    r: np.ndarray = None,
+    map_before_pool: bool = False,
+    mu: np.ndarray = None,
+    vecmap_normalize: bool = False,
+) -> np.ndarray:
+    embs = [
+        embed_text(
+            model,
+            text,
+            pooling=pooling,
+            idf=idf,
+            r=r,
+            map_before_pool=map_before_pool,
+            mu=mu,
+            vecmap_normalize=vecmap_normalize,
+        )
+        for text in texts
+    ]
     return np.vstack(embs).astype(np.float32)
+
+
+def make_alignment_pairs(
+    lex_df: pd.DataFrame,
+    lowercase: bool,
+    strip_accents: bool,
+    remove_punct: bool,
+    align_unit: str,
+) -> Tuple[List[str], List[str]]:
+    src_items = []
+    tgt_items = []
+
+    for src_raw, tgt_raw in zip(lex_df["Bahnaric"].astype(str), lex_df["Vietnamese"].astype(str)):
+        src = normalize_text(src_raw, lowercase=lowercase, strip_accents=strip_accents, remove_punct=remove_punct)
+        tgt = normalize_text(tgt_raw, lowercase=lowercase, strip_accents=strip_accents, remove_punct=remove_punct)
+
+        src_toks = tokenize(src)
+        tgt_toks = tokenize(tgt)
+
+        if not src_toks or not tgt_toks:
+            continue
+
+        if align_unit == "phrase":
+            src_items.append(src)
+            tgt_items.append(tgt)
+        elif align_unit == "token":
+            if len(src_toks) == 1 and len(tgt_toks) == 1:
+                src_items.append(src_toks[0])
+                tgt_items.append(tgt_toks[0])
+        else:
+            raise ValueError(f"Unknown align_unit: {align_unit}")
+
+    if not src_items:
+        raise ValueError(f"No usable alignment pairs for align_unit={align_unit}")
+
+    return src_items, tgt_items
 
 
 def normalize_rows(x: np.ndarray) -> np.ndarray:
@@ -186,10 +258,6 @@ def mean_center(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def kabsch_align(x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """
-    Orthogonal Procrustes / Kabsch.
-    Finds R such that x @ R is close to y.
-    """
     if x.shape != y.shape:
         raise ValueError(f"x and y must have same shape, got {x.shape} and {y.shape}")
 
@@ -237,7 +305,7 @@ def ranking_metrics(topk_idx: np.ndarray, gold_idx: np.ndarray, eval_ks: List[in
         if len(hits) > 0:
             ranks[i] = float(hits[0] + 1)
 
-    metrics: Dict[str, float] = {}
+    metrics = {}
     metrics["MRR"] = float(np.mean(np.where(np.isfinite(ranks), 1.0 / ranks, 0.0)))
     metrics["Top1_acc"] = float(np.mean(ranks == 1.0))
 
@@ -253,7 +321,6 @@ def ranking_metrics(topk_idx: np.ndarray, gold_idx: np.ndarray, eval_ks: List[in
 
 def make_bucket_columns(df_out: pd.DataFrame) -> pd.DataFrame:
     df_out = df_out.copy()
-
     df_out["Bahnaric_len_chars"] = df_out["Bahnaric"].astype(str).str.len()
     df_out["Vietnamese_len_chars"] = df_out["Gold_VN"].astype(str).str.len()
     df_out["Vietnamese_len_words"] = df_out["Gold_VN"].astype(str).str.split().map(len)
@@ -296,74 +363,35 @@ def main(args: argparse.Namespace) -> None:
         train_paths.extend(args.extra_train_csv)
 
     print("[1/5] Building monolingual training corpora...")
-    src_sents = build_training_sentences(
-        train_paths,
-        side="Bahnaric",
-        lowercase=lowercase,
-        strip_accents=args.strip_accents,
-        remove_punct=args.remove_punct,
-    )
-    tgt_sents = build_training_sentences(
-        train_paths,
-        side="Vietnamese",
-        lowercase=lowercase,
-        strip_accents=args.strip_accents,
-        remove_punct=args.remove_punct,
-    )
+    src_sents = build_training_sentences(train_paths, "Bahnaric", lowercase, args.strip_accents, args.remove_punct)
+    tgt_sents = build_training_sentences(train_paths, "Vietnamese", lowercase, args.strip_accents, args.remove_punct)
 
     print(f"Bahnaric training sentences: {len(src_sents)}")
     print(f"Vietnamese training sentences: {len(tgt_sents)}")
 
+    src_idf = build_idf(src_sents)
+    tgt_idf = build_idf(tgt_sents)
+
     print("[2/5] Training Bahnaric fastText model...")
-    src_model = train_fasttext(
-        src_sents,
-        vector_size=args.vector_size,
-        window=args.window,
-        min_count=args.min_count,
-        epochs=args.epochs,
-        sg=args.sg,
-        workers=args.workers,
-        seed=args.seed,
-    )
+    src_model = train_fasttext(src_sents, args.vector_size, args.window, args.min_count, args.epochs, args.sg, args.workers, args.seed)
 
     print("[3/5] Training Vietnamese fastText model...")
-    tgt_model = train_fasttext(
-        tgt_sents,
-        vector_size=args.vector_size,
-        window=args.window,
-        min_count=args.min_count,
-        epochs=args.epochs,
-        sg=args.sg,
-        workers=args.workers,
-        seed=args.seed,
-    )
+    tgt_model = train_fasttext(tgt_sents, args.vector_size, args.window, args.min_count, args.epochs, args.sg, args.workers, args.seed)
 
     print("[4/5] Learning supervised Procrustes mapping from lexicon_train.csv...")
     lex_df = read_parallel_csv(args.lexicon_train_csv)
 
-    src_lex = [
-        normalize_text(
-            x,
-            lowercase=lowercase,
-            strip_accents=args.strip_accents,
-            remove_punct=args.remove_punct,
-        )
-        for x in lex_df["Bahnaric"].astype(str).tolist()
-    ]
-    tgt_lex = [
-        normalize_text(
-            x,
-            lowercase=lowercase,
-            strip_accents=args.strip_accents,
-            remove_punct=args.remove_punct,
-        )
-        for x in lex_df["Vietnamese"].astype(str).tolist()
-    ]
+    src_lex, tgt_lex = make_alignment_pairs(
+        lex_df,
+        lowercase=lowercase,
+        strip_accents=args.strip_accents,
+        remove_punct=args.remove_punct,
+        align_unit=args.align_unit,
+    )
 
-    x = sentence_embeddings(src_model, src_lex)
-    y = sentence_embeddings(tgt_model, tgt_lex)
+    x = embed_texts(src_model, src_lex, pooling=args.pooling, idf=src_idf)
+    y = embed_texts(tgt_model, tgt_lex, pooling=args.pooling, idf=tgt_idf)
 
-    # VecMap-style preprocessing: length normalize + mean center + length normalize.
     if args.vecmap_normalize:
         x = normalize_rows(x)
         y = normalize_rows(y)
@@ -381,7 +409,11 @@ def main(args: argparse.Namespace) -> None:
     np.save(output_dir / "src_mu.npy", src_mu)
     np.save(output_dir / "tgt_mu.npy", tgt_mu)
 
-    print(f"Seed dictionary pairs used: {len(lex_df)}")
+    print(f"Lexicon rows read: {len(lex_df)}")
+    print(f"Alignment pairs used: {len(src_lex)}")
+    print(f"Alignment unit: {args.align_unit}")
+    print(f"Pooling: {args.pooling}")
+    print(f"Map before pool: {args.map_before_pool}")
 
     print("[5/5] Evaluating sentence retrieval on test.csv...")
     test_df = read_parallel_csv(args.test_csv)
@@ -390,45 +422,51 @@ def main(args: argparse.Namespace) -> None:
     raw_vn = test_df["Vietnamese"].astype(str).tolist()
 
     norm_bah = [
-        normalize_text(
-            x,
-            lowercase=lowercase,
-            strip_accents=args.strip_accents,
-            remove_punct=args.remove_punct,
-        )
+        normalize_text(x, lowercase=lowercase, strip_accents=args.strip_accents, remove_punct=args.remove_punct)
         for x in raw_bah
     ]
     norm_vn = [
-        normalize_text(
-            x,
-            lowercase=lowercase,
-            strip_accents=args.strip_accents,
-            remove_punct=args.remove_punct,
-        )
+        normalize_text(x, lowercase=lowercase, strip_accents=args.strip_accents, remove_punct=args.remove_punct)
         for x in raw_vn
     ]
 
-    src_test_emb = sentence_embeddings(src_model, norm_bah)
-    tgt_test_emb = sentence_embeddings(tgt_model, norm_vn)
+    if args.map_before_pool:
+        src_test_emb = embed_texts(
+            src_model,
+            norm_bah,
+            pooling=args.pooling,
+            idf=src_idf,
+            r=r,
+            map_before_pool=True,
+            mu=src_mu,
+            vecmap_normalize=args.vecmap_normalize,
+        )
+        tgt_test_emb = embed_texts(tgt_model, norm_vn, pooling=args.pooling, idf=tgt_idf)
 
-    if args.vecmap_normalize:
-        src_test_emb = normalize_rows(src_test_emb)
-        tgt_test_emb = normalize_rows(tgt_test_emb)
-        src_test_emb = normalize_rows(src_test_emb - src_mu)
-        tgt_test_emb = normalize_rows(tgt_test_emb - tgt_mu)
+        if args.vecmap_normalize:
+            tgt_test_emb = normalize_rows(tgt_test_emb)
+            tgt_test_emb = normalize_rows(tgt_test_emb - tgt_mu)
+    else:
+        src_test_emb = embed_texts(src_model, norm_bah, pooling=args.pooling, idf=src_idf)
+        tgt_test_emb = embed_texts(tgt_model, norm_vn, pooling=args.pooling, idf=tgt_idf)
 
-    src_mapped = src_test_emb @ r
+        if args.vecmap_normalize:
+            src_test_emb = normalize_rows(src_test_emb)
+            tgt_test_emb = normalize_rows(tgt_test_emb)
+            src_test_emb = normalize_rows(src_test_emb - src_mu)
+            tgt_test_emb = normalize_rows(tgt_test_emb - tgt_mu)
+
+        src_test_emb = src_test_emb @ r
 
     if args.use_csls:
-        topk_idx, scores = csls_topk(src_mapped, tgt_test_emb, topk=args.topk_eval, csls_k=args.csls_k)
+        topk_idx, scores = csls_topk(src_test_emb, tgt_test_emb, topk=args.topk_eval, csls_k=args.csls_k)
         retrieval = "csls"
     else:
-        topk_idx, scores = cosine_topk(src_mapped, tgt_test_emb, topk=args.topk_eval)
+        topk_idx, scores = cosine_topk(src_test_emb, tgt_test_emb, topk=args.topk_eval)
         retrieval = "cosine"
 
     gold_idx = np.arange(len(test_df), dtype=np.int64)
     eval_ks = [int(k) for k in args.eval_ks]
-
     metrics, ranks = ranking_metrics(topk_idx, gold_idx, eval_ks)
 
     pred_top1_idx = topk_idx[:, 0]
@@ -473,7 +511,11 @@ def main(args: argparse.Namespace) -> None:
             "lexicon_train_csv": args.lexicon_train_csv,
             "num_queries": int(len(test_df)),
             "candidate_pool_size": int(len(test_df)),
-            "seed_dictionary_size": int(len(lex_df)),
+            "lexicon_rows": int(len(lex_df)),
+            "alignment_pairs_used": int(len(src_lex)),
+            "align_unit": args.align_unit,
+            "pooling": args.pooling,
+            "map_before_pool": bool(args.map_before_pool),
             "vector_size": int(args.vector_size),
             "window": int(args.window),
             "min_count": int(args.min_count),
@@ -500,28 +542,32 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="fastText + supervised Procrustes / VecMap-style baseline for Bahnaric-Vietnamese sentence retrieval"
+        description="Improved fastText + supervised Procrustes baseline for Bahnaric-Vietnamese retrieval"
     )
 
-    parser.add_argument("--train_csv", required=True, help="CSV with columns Bahnaric,Vietnamese for monolingual fastText training")
-    parser.add_argument("--extra_train_csv", nargs="*", default=None, help="Optional extra CSV files for monolingual training")
-    parser.add_argument("--test_csv", required=True, help="CSV with columns Bahnaric,Vietnamese for retrieval evaluation")
-    parser.add_argument("--lexicon_train_csv", required=True, help="Seed dictionary CSV with columns Bahnaric,Vietnamese")
+    parser.add_argument("--train_csv", required=True)
+    parser.add_argument("--extra_train_csv", nargs="*", default=None)
+    parser.add_argument("--test_csv", required=True)
+    parser.add_argument("--lexicon_train_csv", required=True)
     parser.add_argument("--output_dir", required=True)
 
     parser.add_argument("--vector_size", type=int, default=100)
     parser.add_argument("--window", type=int, default=5)
     parser.add_argument("--min_count", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--sg", type=int, default=1, help="1 = skip-gram, 0 = CBOW")
+    parser.add_argument("--sg", type=int, default=1)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
 
     parser.add_argument("--topk_eval", type=int, default=10)
     parser.add_argument("--eval_ks", type=int, nargs="+", default=[1, 5, 10])
 
-    parser.add_argument("--vecmap_normalize", action="store_true", help="Apply VecMap-style normalize-center-normalize preprocessing")
-    parser.add_argument("--use_csls", action="store_true", help="Use CSLS retrieval instead of cosine")
+    parser.add_argument("--pooling", choices=["mean", "idf"], default="mean")
+    parser.add_argument("--align_unit", choices=["phrase", "token"], default="phrase")
+    parser.add_argument("--map_before_pool", action="store_true")
+
+    parser.add_argument("--vecmap_normalize", action="store_true")
+    parser.add_argument("--use_csls", action="store_true")
     parser.add_argument("--csls_k", type=int, default=10)
 
     parser.add_argument("--strip_accents", action="store_true")
