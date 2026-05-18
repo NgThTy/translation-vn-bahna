@@ -20,3 +20,32 @@ logs/
 # LoRA adapter weights from baseline outputs
 results/baselines/lora_contrastive_*/src_adapters/
 results/baselines/lora_contrastive_*/tgt_adapters/
+
+# Generated FLORES data
+data/flores_generalization/
+
+# Backups
+*.bak
+
+# Logs
+logs/
+*.out
+*.err
+
+# Heavy model/checkpoint artifacts
+results/models/
+results/baselines/*/checkpoint*/
+results/baselines/*/best_checkpoint/
+results/baselines/*/src_encoder/
+results/baselines/*/tgt_encoder/
+results/baselines/*/src_adapters/
+results/baselines/*/tgt_adapters/
+*.pt
+*.bin
+*.safetensors
+*.ckpt
+*.pth
+
+# Large prediction outputs
+results/baselines/*/sentence_predictions.csv
+results/baselines/*/*/sentence_predictions.csv
