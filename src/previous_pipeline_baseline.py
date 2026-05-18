@@ -346,6 +346,8 @@ def encode_project_pool(
     batch_size: int,
     pooling: str,
     idf_weights: Optional[Dict[int, float]] = None,
+    token_kabsch_R: Optional[np.ndarray] = None,
+    token_kabsch_t: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
     Supported pooling:
@@ -355,6 +357,12 @@ def encode_project_pool(
         encoder -> project each token -> mean pool
     - token_idf:
         encoder -> project each token -> IDF-weighted pool
+
+    Optional token-level Kabsch:
+    - If token_kabsch_R and token_kabsch_t are provided, Kabsch is applied
+      after token projection and before pooling:
+        encoder -> project each token -> Kabsch each projected token -> pool
+    - This is intended for source/Bahnaric embeddings only.
     """
     base_model.to(device).eval()
     proj_head.to(device).eval()
@@ -385,6 +393,36 @@ def encode_project_pool(
             bsz, seq_len, hidden = last.shape
             flat = last.reshape(bsz * seq_len, hidden)
             projected = proj_head(flat).reshape(bsz, seq_len, -1)
+
+            if token_kabsch_R is not None or token_kabsch_t is not None:
+                if token_kabsch_R is None or token_kabsch_t is None:
+                    raise ValueError("Both token_kabsch_R and token_kabsch_t must be provided together.")
+
+                R_torch = torch.as_tensor(
+                    token_kabsch_R,
+                    dtype=projected.dtype,
+                    device=projected.device,
+                )
+                t_torch = torch.as_tensor(
+                    token_kabsch_t,
+                    dtype=projected.dtype,
+                    device=projected.device,
+                )
+
+                if R_torch.shape != (projected.shape[-1], projected.shape[-1]):
+                    raise ValueError(
+                        f"token_kabsch_R shape {tuple(R_torch.shape)} does not match "
+                        f"projected token dim {projected.shape[-1]}."
+                    )
+                if t_torch.shape[0] != projected.shape[-1]:
+                    raise ValueError(
+                        f"token_kabsch_t shape {tuple(t_torch.shape)} does not match "
+                        f"projected token dim {projected.shape[-1]}."
+                    )
+
+                # Equivalent to numpy apply_kabsch(x): (R @ x.T).T + t
+                # For token tensor [batch, seq, dim], this is x @ R.T + t.
+                projected = torch.matmul(projected, R_torch.T) + t_torch
 
             if pooling == "token_idf":
                 if idf_weights is None:
@@ -484,41 +522,9 @@ def main(args: argparse.Namespace) -> None:
 
     proj_dim = src_proj_dim
 
-    src_idf = None
-    tgt_idf = None
-    if args.pooling == "token_idf":
-        print("Building source IDF weights...")
-        src_idf = build_idf(src_tok, bah, max_len=args.src_max_len)
-        print("Building target IDF weights...")
-        tgt_idf = build_idf(tgt_tok, vn, max_len=args.tgt_max_len)
-
-    print("[1/3] Encoding Bahnaric queries...")
-    bah_emb = encode_project_pool(
-        texts=bah,
-        tokenizer=src_tok,
-        base_model=src_base,
-        proj_head=src_head,
-        device=device,
-        max_len=args.src_max_len,
-        batch_size=args.batch_size,
-        pooling=args.pooling,
-        idf_weights=src_idf,
-    )
-
-    print("[2/3] Encoding Vietnamese candidates...")
-    vn_emb = encode_project_pool(
-        texts=vn,
-        tokenizer=tgt_tok,
-        base_model=tgt_base,
-        proj_head=tgt_head,
-        device=device,
-        max_len=args.tgt_max_len,
-        batch_size=args.batch_size,
-        pooling=args.pooling,
-        idf_weights=tgt_idf,
-    )
-
     use_kabsch = (not args.no_kabsch) and (args.alignment_dir is not None)
+    R = None
+    t = None
 
     if use_kabsch:
         alignment_dir = Path(args.alignment_dir)
@@ -538,8 +544,62 @@ def main(args: argparse.Namespace) -> None:
         if t.shape[0] != proj_dim:
             raise ValueError(f"t shape {t.shape} does not match projection dim {proj_dim}.")
 
-        print("[Kabsch] Applying R.npy and t.npy to Bahnaric embeddings...")
+        if args.kabsch_stage == "token" and args.pooling == "sentence_mean":
+            raise ValueError(
+                "--kabsch_stage token is only valid for token_mean or token_idf pooling. "
+                "sentence_mean pools before projection, so there are no projected token vectors to align."
+            )
+
+        print(f"[Kabsch] Loaded R.npy and t.npy from {alignment_dir}")
+        print(f"[Kabsch] Stage: {args.kabsch_stage}")
+    else:
+        print("[Kabsch] Disabled or no alignment_dir provided.")
+
+    src_idf = None
+    tgt_idf = None
+    if args.pooling == "token_idf":
+        print("Building source IDF weights...")
+        src_idf = build_idf(src_tok, bah, max_len=args.src_max_len)
+        print("Building target IDF weights...")
+        tgt_idf = build_idf(tgt_tok, vn, max_len=args.tgt_max_len)
+
+    print("[1/3] Encoding Bahnaric queries...")
+    bah_emb = encode_project_pool(
+        texts=bah,
+        tokenizer=src_tok,
+        base_model=src_base,
+        proj_head=src_head,
+        device=device,
+        max_len=args.src_max_len,
+        batch_size=args.batch_size,
+        pooling=args.pooling,
+        idf_weights=src_idf,
+        token_kabsch_R=R if use_kabsch and args.kabsch_stage == "token" else None,
+        token_kabsch_t=t if use_kabsch and args.kabsch_stage == "token" else None,
+    )
+
+    print("[2/3] Encoding Vietnamese candidates...")
+    vn_emb = encode_project_pool(
+        texts=vn,
+        tokenizer=tgt_tok,
+        base_model=tgt_base,
+        proj_head=tgt_head,
+        device=device,
+        max_len=args.tgt_max_len,
+        batch_size=args.batch_size,
+        pooling=args.pooling,
+        idf_weights=tgt_idf,
+        token_kabsch_R=None,
+        token_kabsch_t=None,
+    )
+
+    if use_kabsch and args.kabsch_stage == "sentence":
+        print("[Kabsch] Applying R.npy and t.npy to Bahnaric sentence embeddings...")
         bah_retrieval_emb = apply_kabsch(bah_emb, R, t)
+        kabsch_used = True
+    elif use_kabsch and args.kabsch_stage == "token":
+        print("[Kabsch] Already applied to Bahnaric projected token embeddings before pooling.")
+        bah_retrieval_emb = bah_emb
         kabsch_used = True
     else:
         print("[Kabsch] Skipped. Using projected embeddings directly.")
@@ -624,6 +684,7 @@ def main(args: argparse.Namespace) -> None:
             "tgt_max_len": int(args.tgt_max_len),
             "batch_size": int(args.batch_size),
             "kabsch_used": bool(kabsch_used),
+            "kabsch_stage": args.kabsch_stage,
             "use_csls": bool(args.use_csls),
             "csls_k": int(args.csls_k),
             "use_lora": bool(args.use_lora),
@@ -674,6 +735,17 @@ if __name__ == "__main__":
     parser.add_argument("--eval_ks", type=int, nargs="+", default=[1, 5, 10])
 
     parser.add_argument("--no_kabsch", action="store_true", help="Do not apply R.npy/t.npy")
+    parser.add_argument(
+        "--kabsch_stage",
+        choices=["sentence", "token"],
+        default="sentence",
+        help=(
+            "Where to apply Kabsch when --alignment_dir is provided. "
+            "sentence: apply to final Bahnaric sentence embeddings after pooling. "
+            "token: apply to projected Bahnaric token embeddings before pooling; "
+            "valid only for token_mean and token_idf."
+        ),
+    )
     parser.add_argument("--use_csls", action="store_true", help="Use CSLS instead of cosine")
     parser.add_argument("--csls_k", type=int, default=10)
 
