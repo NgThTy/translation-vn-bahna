@@ -1,0 +1,31 @@
+{
+  "MRR": 0.2442,
+  "Top1_acc": 0.17,
+  "Hit@1": 0.17,
+  "Recall@1": 0.17,
+  "Precision@1": 0.17,
+  "Hit@5": 0.3468,
+  "Recall@5": 0.3468,
+  "Precision@5": 0.0694,
+  "Hit@10": 0.4427,
+  "Recall@10": 0.4427,
+  "Precision@10": 0.0443,
+  "method": "frozen_xlmr_retrieval",
+  "pipeline": "frozen_xlmr_mean_pool_retrieval",
+  "test_csv": "data/flores_generalization/khmkhmr_vielatn/test.csv",
+  "model_name": "xlm-roberta-base",
+  "retrieval": "cosine",
+  "num_queries": 1012,
+  "candidate_pool_size": 1012,
+  "embedding_dim": 768,
+  "topk_eval": 10,
+  "eval_ks": [
+    1,
+    5,
+    10
+  ],
+  "max_len": 256,
+  "batch_size": 16,
+  "use_csls": false,
+  "csls_k": 10
+}

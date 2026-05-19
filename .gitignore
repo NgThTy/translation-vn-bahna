@@ -49,3 +49,15 @@ results/baselines/*/tgt_adapters/
 # Large prediction outputs
 results/baselines/*/sentence_predictions.csv
 results/baselines/*/*/sentence_predictions.csv
+
+# Large experiment checkpoints
+results/**/checkpoint_epoch_*/
+results/**/best_checkpoint/
+results/**/checkpoint_final/
+results/**/*.pt
+results/**/*.bin
+results/**/*.safetensors
+results/**/src_encoder/
+results/**/tgt_encoder/
+results/**/src_adapters/
+results/**/tgt_adapters/
