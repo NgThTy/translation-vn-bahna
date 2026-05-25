@@ -1,0 +1,31 @@
+{
+  "MRR": 0.0172,
+  "Top1_acc": 0.0,
+  "Hit@1": 0.0,
+  "Recall@1": 0.0,
+  "Precision@1": 0.0,
+  "Hit@5": 0.04,
+  "Recall@5": 0.04,
+  "Precision@5": 0.008,
+  "Hit@10": 0.07,
+  "Recall@10": 0.07,
+  "Precision@10": 0.007,
+  "method": "frozen_xlmr_retrieval",
+  "pipeline": "frozen_xlmr_mean_pool_retrieval",
+  "test_csv": "data/other_low_resource_generalization/zhuang_chinese/test.csv",
+  "model_name": "xlm-roberta-base",
+  "retrieval": "cosine",
+  "num_queries": 200,
+  "candidate_pool_size": 200,
+  "embedding_dim": 768,
+  "topk_eval": 10,
+  "eval_ks": [
+    1,
+    5,
+    10
+  ],
+  "max_len": 256,
+  "batch_size": 16,
+  "use_csls": false,
+  "csls_k": 10
+}
