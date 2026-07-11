@@ -39,3 +39,6 @@ typing-extensions==4.12.2
 
 # LoRA / PEFT
 peft==0.17.1
+
+# related to dev setup
+rapidfuzz>=3.9,<4

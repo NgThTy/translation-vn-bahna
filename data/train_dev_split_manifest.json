@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "input_csv": "data/train.csv",
+  "input_sha256": "e6cd3df61603019d7af96fe3854f1ee09ef481d2f005c2e3539d4fc78cfc6993",
+  "train_output": "data/train_fit.csv",
+  "dev_output": "data/dev.csv",
+  "seed": 42,
+  "dev_ratio_requested": 0.1,
+  "original_rows": 51930,
+  "train_fit_rows": 46736,
+  "dev_rows": 5194,
+  "actual_dev_ratio": 0.10001925669170036,
+  "split_strategy": "group_shuffle_by_exact_bilingual_pair",
+  "stratification": "disabled because duplicate-pair grouping took priority",
+  "duplicate_pair_rows_in_input": 12,
+  "train_output_sha256": "128d66be53f6cbc572b0a4cf8e4bed382e03f3c3b75e5133dc58bc6a4061502c",
+  "dev_output_sha256": "e59ab5af768b2c16347206fbb41b479212917a442ce2381d0bed156628fd64c7",
+  "test_file_read_or_modified": false
+}

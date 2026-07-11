@@ -1,105 +1,225 @@
-# Bahnaric - Vietnamse: Projection, Alignment & Sentence Translation (Windows, Local)
+# Bahnar--Vietnamese Cross-Lingual Sentence Retrieval
 
-This repository fine-tunes lightweight multilingual sentence models with small projection heads to align Bahnaric and Vietnamese embeddings. It then performs a supervised Procrustes (Kabsch) alignment for word-level vocabularies and evaluates sentence-level translation via retrieval with cosine/CSLS and topk_accuracy/BLEU/chrF.
-- Target OS: Windows 10/11 
-- Python: 3.12.7
-- Hardware: Local machine (CPU works; CUDA will be used automatically if available)
+This repository contains code, data-processing scripts, and experiment outputs for the paper:
 
-## Repository layout
-- data/
-    - train.csv
-    - test. csv
-    - lexicon.csv
-    - src_vocab.csv
-    - tgt_vocab.csv
-- results/
-    - models_demo/
-    - alignment/
-    - sent_eval/
-- src/
-    - train_embeddings.py
-    - test_embeddings.py
-    - split_lexicon_by_source.py
-    - align_embeddings.py
-    - translate_and_eval_sentences.py
-- requirements.txt
-- README.md
-- .gitignore
+**Bahnar--Vietnamese Cross-Lingual Sentence Retrieval: A Low-Resource Case Study with Lexical, Neural, and Hybrid Methods**
 
-## Data formats
-data/train.csv, data/test.csv (sentences) \
-Required columns:
-- Bahnaric : string
-- Vietnamese: string 
+The project studies **Bahnar--Vietnamese cross-lingual sentence retrieval** as a candidate-ranking task. Given a Bahnar query sentence, the system ranks Vietnamese candidate sentences and aims to place the gold Vietnamese counterpart as high as possible.
 
-data/lexicon.csv (word pairs for alignment/eval) \
-Required columns:
-- Bahnaric : token 
-- Vietnamese: token
+We compare lexical, edit-distance, static embedding alignment, word-alignment, multilingual encoder, dense retrieval, neural adaptation, full fine-tuning, and hybrid reranking methods. Our main proposed method is a **hybrid IBM1--XLM-R LoRA reranker**, where an XLM-R LoRA retriever first generates a top-$K$ candidate list and IBM1 lexical alignment scores are then used to rerank the candidates.
 
-data/src_vocab.csv, data/tgt_vocab.csv (vocabularies) \
-Required columns:
-- word : token string (vocabulary item)
-- text : surface form/surrounding text used for embedding
+## Main Methods
 
-## Windows setup
-1. Install Python 3.12.7 (add “Add python.exe to PATH”). 
-2. Open PowerShell in the repo root.
-3. Create & activate a virtual environment \
-`python -m venv .venv` \
-`.\.venv\Scripts\Activate.ps1`
-4. Upgrade pip & install dependencies \
-`python -m pip install --upgrade pip`\
-`pip install -r requirements.txt`
+The repository supports experiments for:
 
+- Character n-gram TF-IDF and BM25 retrieval
+- Levenshtein/edit-distance and token-overlap retrieval
+- fastText with supervised Procrustes/VecMap-style alignment
+- IBM Model 1 lexical alignment and sentence-level scoring
+- Off-the-shelf multilingual encoders such as mBERT, XLM-R, MiniLM, and LaBSE
+- Projection-based XLM-R adaptation with LoRA and projection heads
+- Full-encoder XLM-R contrastive fine-tuning
+- Hybrid IBM1--XLM-R LoRA reranking
+- Transfer experiments for Khmer--Vietnamese, Lao--Vietnamese, and Zhuang--Chinese retrieval
 
-## Run from repo root
-This runs: split lexicon → train projection heads (sentences) → align on words → translate & evaluate sentences.
+## Task Definition
 
-0) Ensure UTF-8 console \
-`$Env:PYTHONIOENCODING="utf-8" `
+For each source-language query sentence `q`, the system ranks a candidate pool of target-language sentences `C = {c_1, ..., c_n}`.
 
-1) Split lexicon into train/test \
-`python .\src\split_lexicon_by_source.py`
+For the main Bahnar--Vietnamese task:
 
-2) Train projection heads on sentence pairs \
-`python .\src\train_embeddings.py `\
-`  --train_csv .\data\train.csv `\
-`  --src_model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 `\
-`  --tgt_model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 `\
-`  --projection_dim 256 `\
-`  --freeze_base `\
-`  --epochs 1 --batch_size 8 --lr 2e-4 `\
-`  --src_max_len 256 --tgt_max_len 256 `\
-`  --output_dir .\results\models_demo `\
-`  --num_workers 0 --pin_memory`
+- Each Bahnar sentence in the held-out test set is used as a query.
+- All Vietnamese sentences in the same test set form the candidate pool.
+- Each query has exactly one gold Vietnamese counterpart.
+- Systems are evaluated with:
+  - Accuracy@1
+  - Recall@5
+  - Recall@10
+  - MRR
 
-3) Build vocab embeddings, learn R,t with Kabsch, evaluate on held-out lexicon \
-`python .\src\align_embeddings.py `\
-`  --src_emb_csv .\data\src_vocab.csv `\
-`  --tgt_emb_csv .\data\tgt_vocab.csv `\
-`  --align_pairs_csv .\data\lexicon_train.csv `\
-`  --eval_pairs_csv .\data\lexicon_test.csv `\
-`  --proj_dir .\results\models_demo `\
-`  --output_dir .\results\alignment `\
-`  --topk 5 `\
-`  --src_max_len 16 --tgt_max_len 16 `
+Although some older script names still use the word `translate`, the paper evaluates **sentence retrieval**, not machine translation.
 
-4) Sentence translation via retrieval + BLEU/chrF \
-`python .\src\translate_and_eval_sentences.py `\
-`  --test_csv .\data\test.csv `\
-` --proj_dir .\results\models_demo `\
-` --alignment_dir .\results\alignment `\
-`  --src_model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 `\
-`  --tgt_model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 `\
-`  --src_max_len 256 --tgt_max_len 256 `\
-`  --batch_size 8 `\
-`  --use_idf_pool `\
-`  --use_csls `\
-`  --csls_k 10 `\
-`  --output_dir .\results\sent_eval `
+## Repository Layout
 
-### Outputs to verify
-- results\models_demo\src_proj.pt, tgt_proj.pt, meta.txt
-- results\alignment\R.npy, t.npy, top_predictions_sample.csv
-- results\sent_eval\sentence_predictions.csv
+The current repository is organized as follows:
+
+```text
+.
+├── data/
+│   ├── other_low_resource_generalization/
+│   ├── trial/
+│   ├── lexicon.csv
+│   ├── lexicon_train.csv
+│   ├── lexicon_test.csv
+│   ├── src_vocab.csv
+│   ├── tgt_vocab.csv
+│   ├── train.csv
+│   └── test.csv
+├── results/
+│   ├── alignment/
+│   ├── baselines/
+│   │   ├── bm25_char_2_5/
+│   │   ├── bm25_char_3_6/
+│   │   ├── tfidf_char_2_5/
+│   │   ├── tfidf_char_3_6/
+│   │   ├── fasttext_procrustes_*/
+│   │   ├── previous_pipeline_xlmr_*/
+│   │   ├── flores_*/
+│   │   ├── other_zhuang_chinese_*/
+│   │   └── token_jaccard_strip_accents_no_punct/
+│   ├── models/
+│   ├── sent_eval/
+│   ├── sent_eval_rank/
+│   ├── trial/
+│   └── flores_generalization_summary.csv
+├── src/
+│   ├── align_embeddings.py
+│   ├── collect_flores_generalization_results.py
+│   ├── convert_flores_topk_indices_to_preds.py
+│   ├── edit_distance_retrieval_baseline.py
+│   ├── fasttext_procrustes_baseline.py
+│   ├── frozen_xlmr_flores_retrieval.py
+│   ├── full_encoder_contrastive_finetune_baseline.py
+│   ├── hybrid_lexical_neural_rerank.py
+│   ├── lexical_retrieval_baseline.py
+│   ├── lora_projection_generalization_train_eval.py
+│   ├── multilingual_encoder_baseline.py
+│   ├── prepare_flores_generalization_pairs.py
+│   ├── prepare_other_low_resource_data.py
+│   ├── previous_pipeline_baseline.py
+│   ├── split_lexicon_by_source.py
+│   ├── test_embeddings.py
+│   ├── train_embeddings.py
+│   ├── translate_and_eval_sentences.py
+│   └── word_alignment_baseline.py
+├── run_edit_distance_baselines.sh
+├── run_fasttext_procrustes_baselines.sh
+├── run_flores_generalization_reviewer_response.sh
+├── run_flores_ibm1_hybrid_rerank.sh
+├── requirements.txt
+├── README.md
+└── .gitignore
+
+# Development-based model selection for Bahnaric-Vietnamese retrieval
+
+This patch removes test-set model selection for the lexical and edit-distance
+families. All method, preprocessing, and parameter variants are compared on a
+development split carved from `data/train.csv`. Only the development-selected
+configuration is then evaluated on `data/test.csv`.
+
+## Split policy
+
+Create the split once:
+
+```bash
+python src/prepare_train_dev_split.py \
+  --input_csv data/train.csv \
+  --train_output data/train_fit.csv \
+  --dev_output data/dev.csv \
+  --manifest_output data/train_dev_split_manifest.json \
+  --dev_ratio 0.10 \
+  --seed 42
+```
+
+For 51,930 original training pairs and no duplicate-pair grouping adjustment,
+this produces:
+
+- `data/train_fit.csv`: 46,737 pairs
+- `data/dev.csv`: 5,193 pairs
+- `data/test.csv`: unchanged, 2,001 pairs
+
+The split script never reads or modifies `data/test.csv`. It preserves each
+Bahnaric-Vietnamese pair as one row. If exact duplicate bilingual pairs exist,
+they are grouped so duplicates cannot appear in both train and development.
+Otherwise, the script stratifies by source/domain metadata when available and
+falls back to Vietnamese sentence-length bins. The manifest records the seed,
+strategy, row counts, and SHA-256 checksums.
+
+## Selection rule
+
+The predefined primary selection metric is development `Top1_acc`
+(Accuracy@1). Ties are resolved in this order:
+
+1. higher development MRR;
+2. higher development Recall@5;
+3. lexicographically smaller configuration name.
+
+The test set is not consulted during any tie-breaking or configuration choice.
+The baseline evaluators reject a test run unless its parameters match
+`results/dev_selection/selected_configs.json`.
+
+## Lexical family
+
+```bash
+bash run_lexical_baselines.sh
+```
+
+This evaluates the declared TF-IDF/BM25, character n-gram, and preprocessing
+variants on `data/dev.csv`, selects one configuration, and performs one test
+run. Outputs are written to:
+
+```text
+results/dev/lexical/<configuration>/
+results/test/lexical/<selected-configuration>/
+results/dev_selection/
+```
+
+## Edit-distance family
+
+RapidFuzz is used to make the full development candidate-pool evaluation
+practical:
+
+```bash
+python -m pip install "rapidfuzz>=3.9,<4"
+bash run_edit_distance_baselines.sh
+```
+
+Outputs are written to:
+
+```text
+results/dev/edit_distance/<configuration>/
+results/test/edit_distance/<selected-configuration>/
+results/dev_selection/
+```
+
+## Retraining policy
+
+Lexical and edit-distance baselines have no learned model parameters, so no
+retraining on `train_fit + dev` is performed after selection. Their vectorizers
+or candidate statistics are constructed independently for the candidate pool
+being evaluated, as required by the retrieval task. For learned families added
+later, the manuscript and code must explicitly state whether the selected
+configuration is retrained on `train_fit + dev` before its single test run.
+
+## Table 2 ordering comparison
+
+After every Table 2 family has a dev-selected test result, prepare a CSV such as:
+
+```csv
+family,old_table2_rank,old_test_accuracy_at_1
+lexical,8,0.1234
+edit_distance,7,0.1456
+```
+
+Then run:
+
+```bash
+python src/select_dev_configs_and_evaluate_test.py \
+  --dev_root results/dev \
+  --test_root results/test \
+  --output_root results/dev_selection \
+  --old_table2_csv results/dev_selection/old_table2.csv
+```
+
+The script writes:
+
+```text
+results/dev_selection/all_dev_variants.csv
+results/dev_selection/selected_configs.json
+results/dev_selection/dev_selected_test_results.csv
+results/dev_selection/table2_ordering_comparison.csv
+results/dev_selection/table2_ordering_summary.json
+```
+
+`table2_ordering_summary.json` states whether the original ordering is
+preserved once complete results for all old Table 2 families are available.

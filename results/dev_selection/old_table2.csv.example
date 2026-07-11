@@ -1,0 +1,9 @@
+family,old_table2_rank,old_test_accuracy_at_1
+lexical,,
+edit_distance,,
+fasttext_procrustes,,
+ibm1,,
+off_the_shelf,,
+xlmr_lora,,
+full_encoder,,
+hybrid,,
