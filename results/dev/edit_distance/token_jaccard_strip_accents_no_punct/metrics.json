@@ -1,0 +1,53 @@
+{
+  "MRR": 0.049407,
+  "Top1_acc": 0.040046,
+  "Hit@1": 0.040046,
+  "Recall@1": 0.040046,
+  "Precision@1": 0.040046,
+  "Hit@5": 0.061224,
+  "Recall@5": 0.061224,
+  "Precision@5": 0.012245,
+  "Hit@10": 0.073354,
+  "Recall@10": 0.073354,
+  "Precision@10": 0.007335,
+  "schema_version": 2,
+  "family": "edit_distance",
+  "configuration_name": "token_jaccard_strip_accents_no_punct",
+  "split": "dev",
+  "input_csv": "data/dev.csv",
+  "num_queries": 5194,
+  "candidate_pool_size": 5194,
+  "selection_metric": "Top1_acc",
+  "configuration": {
+    "method": "token_jaccard",
+    "strip_accents": true,
+    "lowercase": true,
+    "remove_punct": true,
+    "remove_spaces": false,
+    "topk_eval": 10,
+    "eval_ks": [
+      1,
+      5,
+      10
+    ],
+    "chunk_size": 256,
+    "workers": -1
+  },
+  "evaluator_script": "src/edit_distance_retrieval_baseline.py",
+  "evaluation_cli_args": [
+    "--method",
+    "token_jaccard",
+    "--topk_eval",
+    "10",
+    "--chunk_size",
+    "256",
+    "--workers",
+    "-1",
+    "--eval_ks",
+    "1",
+    "5",
+    "10",
+    "--strip_accents",
+    "--remove_punct"
+  ]
+}

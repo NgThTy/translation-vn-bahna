@@ -1,0 +1,52 @@
+{
+  "MRR": 0.092111,
+  "Top1_acc": 0.076049,
+  "Hit@1": 0.076049,
+  "Recall@1": 0.076049,
+  "Precision@1": 0.076049,
+  "Hit@5": 0.112437,
+  "Recall@5": 0.112437,
+  "Precision@5": 0.022487,
+  "Hit@10": 0.132075,
+  "Recall@10": 0.132075,
+  "Precision@10": 0.013208,
+  "schema_version": 2,
+  "family": "edit_distance",
+  "configuration_name": "levenshtein_ratio_strip_accents",
+  "split": "dev",
+  "input_csv": "data/dev.csv",
+  "num_queries": 5194,
+  "candidate_pool_size": 5194,
+  "selection_metric": "Top1_acc",
+  "configuration": {
+    "method": "levenshtein_ratio",
+    "strip_accents": true,
+    "lowercase": true,
+    "remove_punct": false,
+    "remove_spaces": false,
+    "topk_eval": 10,
+    "eval_ks": [
+      1,
+      5,
+      10
+    ],
+    "chunk_size": 256,
+    "workers": -1
+  },
+  "evaluator_script": "src/edit_distance_retrieval_baseline.py",
+  "evaluation_cli_args": [
+    "--method",
+    "levenshtein_ratio",
+    "--topk_eval",
+    "10",
+    "--chunk_size",
+    "256",
+    "--workers",
+    "-1",
+    "--eval_ks",
+    "1",
+    "5",
+    "10",
+    "--strip_accents"
+  ]
+}

@@ -1,0 +1,3 @@
+family,selected_configuration,development_accuracy_at_1,development_mrr,development_recall_at_5,test_accuracy_at_1,test_mrr,test_recall_at_5,test_metrics_path,new_rank,old_table2_rank,rank_preserved
+edit_distance,levenshtein_ratio_strip_accents,0.076049,0.092111,0.112437,0.424788,0.444711,0.470265,results/test/edit_distance/levenshtein_ratio_strip_accents/metrics.json,1,,
+lexical,bm25_char_2_5_strip_accents_no_punct_no_spaces,0.063727,0.085519,0.114555,0.372314,0.400366,0.43928,results/test/lexical/bm25_char_2_5_strip_accents_no_punct_no_spaces/metrics.json,2,,

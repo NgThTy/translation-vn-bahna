@@ -1,0 +1,107 @@
+{
+  "edit_distance": {
+    "family": "edit_distance",
+    "configuration_name": "levenshtein_ratio_strip_accents",
+    "configuration": {
+      "method": "levenshtein_ratio",
+      "strip_accents": true,
+      "lowercase": true,
+      "remove_punct": false,
+      "remove_spaces": false,
+      "topk_eval": 10,
+      "eval_ks": [
+        1,
+        5,
+        10
+      ],
+      "chunk_size": 256,
+      "workers": -1
+    },
+    "development_metrics": {
+      "Top1_acc": 0.076049,
+      "MRR": 0.092111,
+      "Recall@5": 0.112437
+    },
+    "selection_metric": "Top1_acc",
+    "tie_breakers": [
+      "MRR",
+      "Recall@5",
+      "configuration_name_ascending"
+    ],
+    "dev_metrics_path": "results/dev/edit_distance/levenshtein_ratio_strip_accents/metrics.json",
+    "evaluator_script": "src/edit_distance_retrieval_baseline.py",
+    "evaluation_cli_args": [
+      "--method",
+      "levenshtein_ratio",
+      "--topk_eval",
+      "10",
+      "--chunk_size",
+      "256",
+      "--workers",
+      "-1",
+      "--eval_ks",
+      "1",
+      "5",
+      "10",
+      "--strip_accents"
+    ]
+  },
+  "lexical": {
+    "family": "lexical",
+    "configuration_name": "bm25_char_2_5_strip_accents_no_punct_no_spaces",
+    "configuration": {
+      "method": "bm25_char",
+      "ngram_min": 2,
+      "ngram_max": 5,
+      "strip_accents": true,
+      "lowercase": true,
+      "remove_punct": true,
+      "remove_spaces": true,
+      "bm25_k1": 1.5,
+      "bm25_b": 0.75,
+      "topk_eval": 10,
+      "eval_ks": [
+        1,
+        5,
+        10
+      ],
+      "chunk_size": 256
+    },
+    "development_metrics": {
+      "Top1_acc": 0.063727,
+      "MRR": 0.085519,
+      "Recall@5": 0.114555
+    },
+    "selection_metric": "Top1_acc",
+    "tie_breakers": [
+      "MRR",
+      "Recall@5",
+      "configuration_name_ascending"
+    ],
+    "dev_metrics_path": "results/dev/lexical/bm25_char_2_5_strip_accents_no_punct_no_spaces/metrics.json",
+    "evaluator_script": "src/lexical_retrieval_baseline.py",
+    "evaluation_cli_args": [
+      "--method",
+      "bm25_char",
+      "--ngram_min",
+      "2",
+      "--ngram_max",
+      "5",
+      "--bm25_k1",
+      "1.5",
+      "--bm25_b",
+      "0.75",
+      "--topk_eval",
+      "10",
+      "--chunk_size",
+      "256",
+      "--eval_ks",
+      "1",
+      "5",
+      "10",
+      "--strip_accents",
+      "--remove_punct",
+      "--remove_spaces"
+    ]
+  }
+}
