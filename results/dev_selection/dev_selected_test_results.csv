@@ -1,4 +1,5 @@
 family,selected_configuration,development_accuracy_at_1,development_mrr,development_recall_at_5,test_accuracy_at_1,test_mrr,test_recall_at_5,test_metrics_path
 edit_distance,levenshtein_ratio_strip_accents,0.076049,0.092111,0.112437,0.424788,0.444711,0.470265,results/test/edit_distance/levenshtein_ratio_strip_accents/metrics.json
 fasttext_procrustes,fasttext_procrustes_phrase_mean_vecmap_csls_strip_accents_no_punct,0.190605,0.25803,0.351367,0.164418,0.212248,0.271864,results/test/fasttext_procrustes/fasttext_procrustes_phrase_mean_vecmap_csls_strip_accents_no_punct/metrics.json
+ibm1,ibm1_sym_strip_accents_no_punct_lenpen,0.408,0.4781,0.5741,0.4933,0.5459,0.6167,results/test/ibm1/ibm1_sym_strip_accents_no_punct_lenpen/metrics.json
 lexical,bm25_char_2_5_strip_accents_no_punct_no_spaces,0.063727,0.085519,0.114555,0.372314,0.400366,0.43928,results/test/lexical/bm25_char_2_5_strip_accents_no_punct_no_spaces/metrics.json

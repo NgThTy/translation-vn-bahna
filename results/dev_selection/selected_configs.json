@@ -126,6 +126,59 @@
       "--remove_punct"
     ]
   },
+  "ibm1": {
+    "family": "ibm1",
+    "configuration_name": "ibm1_sym_strip_accents_no_punct_lenpen",
+    "configuration": {
+      "method": "ibm1_sym",
+      "ibm_iters": 5,
+      "smoothing": 1e-09,
+      "length_penalty": 0.1,
+      "strip_accents": true,
+      "lowercase": true,
+      "remove_punct": true,
+      "topk_eval": 10,
+      "eval_ks": [
+        1,
+        5,
+        10
+      ],
+      "fit_policy": "train_fit_only_no_dev_refit"
+    },
+    "development_metrics": {
+      "Top1_acc": 0.408,
+      "MRR": 0.4781,
+      "Recall@5": 0.5741
+    },
+    "selection_metric": "Top1_acc",
+    "tie_breakers": [
+      "MRR",
+      "Recall@5",
+      "configuration_name_ascending"
+    ],
+    "dev_metrics_path": "results/dev/ibm1/ibm1_sym_strip_accents_no_punct_lenpen/metrics.json",
+    "evaluator_script": "src/word_alignment_baseline.py",
+    "evaluation_cli_args": [
+      "--train_csv",
+      "data/train_fit.csv",
+      "--method",
+      "ibm1_sym",
+      "--ibm_iters",
+      "5",
+      "--smoothing",
+      "1e-09",
+      "--length_penalty",
+      "0.1",
+      "--topk_eval",
+      "10",
+      "--eval_ks",
+      "1",
+      "5",
+      "10",
+      "--strip_accents",
+      "--remove_punct"
+    ]
+  },
   "lexical": {
     "family": "lexical",
     "configuration_name": "bm25_char_2_5_strip_accents_no_punct_no_spaces",
