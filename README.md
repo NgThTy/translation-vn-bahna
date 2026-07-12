@@ -223,3 +223,73 @@ results/dev_selection/table2_ordering_summary.json
 
 `table2_ordering_summary.json` states whether the original ordering is
 preserved once complete results for all old Table 2 families are available.
+
+## FastText + Procrustes development selection
+
+The FastText/Procrustes family follows the same held-out selection protocol as
+the lexical and edit-distance families.
+
+### Fitting and refitting policy
+
+- `data/train_fit.csv` is used to train both monolingual FastText models, build
+  IDF weights, and learn the supervised Procrustes mapping.
+- `data/dev.csv` is used only to compare preprocessing, pooling, alignment, and
+  retrieval variants.
+- The selected configuration is retrained from scratch on `data/train_fit.csv`
+  only and evaluated once on `data/test.csv`.
+- The development set is not merged back into training for the final run. This
+  policy is recorded as `train_fit_only_no_dev_refit` in every metrics file.
+- `--workers 1` and seed `42` are used to make FastText training reproducible.
+
+The selected family member is chosen by:
+
+1. highest development `Top1_acc`;
+2. highest development `MRR`;
+3. highest development `Recall@5`;
+4. ascending configuration name as a deterministic final tie-breaker.
+
+### Run
+
+Create the split first if it does not already exist:
+
+```bash
+python src/prepare_train_dev_split.py \
+  --input_csv data/train.csv \
+  --train_output data/train_fit.csv \
+  --dev_output data/dev.csv \
+  --manifest_output data/train_dev_split_manifest.json \
+  --dev_ratio 0.10 \
+  --seed 42
+```
+
+Run all FastText/Procrustes variants on development data and then run exactly
+one development-selected test evaluation:
+
+```bash
+bash run_fasttext_procrustes_baselines.sh
+```
+
+Development variants are written under:
+
+```text
+results/dev/fasttext_procrustes/<configuration>/
+```
+
+The single final test result is written under:
+
+```text
+results/test/fasttext_procrustes/<selected-configuration>/
+```
+
+Selection summaries are updated in:
+
+```text
+results/dev_selection/all_dev_variants.csv
+results/dev_selection/selected_configs.json
+results/dev_selection/dev_selected_test_results.csv
+results/dev_selection/table2_ordering_comparison.csv
+```
+
+Do not run the FastText/Procrustes evaluator directly on `data/test.csv`. A test
+run requires the selection manifest and rejects any configuration that does not
+exactly match the development-selected configuration.

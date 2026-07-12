@@ -21,6 +21,7 @@ DEFAULT_TIE_BREAKERS = ("MRR", "Recall@5")
 SUPPORTED_EVALUATORS = {
     "lexical": "src/lexical_retrieval_baseline.py",
     "edit_distance": "src/edit_distance_retrieval_baseline.py",
+    "fasttext_procrustes": "src/fasttext_procrustes_baseline.py",
 }
 
 
