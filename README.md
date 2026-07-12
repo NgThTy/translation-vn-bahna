@@ -378,3 +378,53 @@ PY
 
 The full Table 2 ordering should be interpreted only after every reported method
 family has been converted to the same development-selection protocol.
+
+# Off-the-shelf encoder development selection
+
+The ten declared encoder/preprocessing/retrieval variants are evaluated only on
+`data/dev.csv`. The central selector chooses one configuration using `Top1_acc`,
+then `MRR`, then `Recall@5`, then the ascending configuration name. Only that
+configuration is evaluated on `data/test.csv`.
+
+This family performs no fitting. Its policy is `off_the_shelf_no_training`.
+
+## Resumable execution
+
+A completed variant is identified by a nonempty
+`results/dev/off_the_shelf/<variant>/metrics.json`. Existing completed runs are
+not deleted.
+
+Run one variant per short server allocation:
+
+```bash
+OFFSHELF_VARIANT=offtheshelf_mbert_cosine_raw \
+  bash run_off_the_shelf_encoder_baselines.sh
+```
+
+After all ten variants are complete, run the script without an environment
+variable. It skips completed variants, rebuilds the consolidated selection
+manifest, and evaluates the selected off-the-shelf configuration on test:
+
+```bash
+bash run_off_the_shelf_encoder_baselines.sh
+```
+
+Embedding caches are stored under
+`results/cache/off_the_shelf_embeddings/`. Cosine and CSLS variants with the
+same model and preprocessing share the same cached embeddings. Cache files are
+runtime artifacts and should not be committed.
+
+Add this line to `.gitignore`:
+
+```gitignore
+results/cache/
+```
+
+Expected result locations:
+
+```text
+results/dev/off_the_shelf/<all-ten-configurations>/
+results/test/off_the_shelf/<one-selected-configuration>/
+results/dev_selection/selected_configs.json
+results/dev_selection/dev_selected_test_results.csv
+```

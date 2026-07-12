@@ -23,6 +23,7 @@ SUPPORTED_EVALUATORS = {
     "edit_distance": "src/edit_distance_retrieval_baseline.py",
     "fasttext_procrustes": "src/fasttext_procrustes_baseline.py",
     "ibm1": "src/word_alignment_baseline.py",
+    "off_the_shelf": "src/multilingual_encoder_baseline.py",
 }
 
 
@@ -381,3 +382,4 @@ if __name__ == "__main__":
         help="CSV containing family plus old_table2_rank or old Accuracy@1 values.",
     )
     main(parser.parse_args())
+
