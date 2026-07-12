@@ -293,3 +293,88 @@ results/dev_selection/table2_ordering_comparison.csv
 Do not run the FastText/Procrustes evaluator directly on `data/test.csv`. A test
 run requires the selection manifest and rejects any configuration that does not
 exactly match the development-selected configuration.
+
+# IBM1 development-selection workflow
+
+This patch converts the IBM1 word-alignment family to the same reviewer-compliant
+protocol used by the other Bahnaric-Vietnamese families.
+
+## Protocol
+
+- Training data: `data/train_fit.csv` only.
+- Selection data: `data/dev.csv`.
+- Held-out evaluation data: `data/test.csv`.
+- Selection metric: Accuracy@1 (`Top1_acc`).
+- Tie-breakers: MRR, Recall@5, then configuration name in ascending order.
+- Refit policy: `train_fit_only_no_dev_refit`.
+- Test policy: exactly one development-selected IBM1 configuration is evaluated.
+
+The five development variants are:
+
+1. `ibm1_raw`
+2. `ibm1_strip_accents`
+3. `ibm1_strip_accents_no_punct`
+4. `ibm1_sym_strip_accents_no_punct`
+5. `ibm1_sym_strip_accents_no_punct_lenpen`
+
+## Updated files
+
+- `src/word_alignment_baseline.py`
+- `run_word_alignment_baselines.sh`
+- `src/select_dev_configs_and_evaluate_test.py`
+
+The central selector now registers the `ibm1` family.
+
+## Run
+
+Make sure these files already exist:
+
+```text
+data/train_fit.csv
+data/dev.csv
+data/test.csv
+```
+
+Then run:
+
+```bash
+bash run_word_alignment_baselines.sh
+```
+
+The script clears only stale IBM1-family outputs, evaluates the five variants on
+development data, rebuilds the consolidated selection manifest from every family
+currently under `results/dev`, and evaluates only the selected IBM1 variant on
+the held-out test set.
+
+## Outputs
+
+```text
+results/dev/ibm1/<configuration>/metrics.json
+results/test/ibm1/<selected-configuration>/metrics.json
+results/dev_selection/all_dev_variants.csv
+results/dev_selection/selected_configs.json
+results/dev_selection/dev_selected_test_results.csv
+results/dev_selection/table2_ordering_comparison.csv
+results/dev_selection/table2_ordering_summary.json
+```
+
+`selected_configs.json` is rewritten as a consolidated manifest. Existing
+lexical, edit-distance, and FastText entries remain present when their valid
+`split: dev` metric files still exist under `results/dev`.
+
+Inspect the selected IBM1 configuration with:
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+manifest = json.loads(
+    Path("results/dev_selection/selected_configs.json").read_text(encoding="utf-8")
+)
+print(json.dumps(manifest["ibm1"], indent=2))
+PY
+```
+
+The full Table 2 ordering should be interpreted only after every reported method
+family has been converted to the same development-selection protocol.

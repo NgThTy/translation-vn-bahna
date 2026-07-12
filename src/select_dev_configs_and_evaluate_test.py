@@ -22,6 +22,7 @@ SUPPORTED_EVALUATORS = {
     "lexical": "src/lexical_retrieval_baseline.py",
     "edit_distance": "src/edit_distance_retrieval_baseline.py",
     "fasttext_procrustes": "src/fasttext_procrustes_baseline.py",
+    "ibm1": "src/word_alignment_baseline.py",
 }
 
 
@@ -71,8 +72,6 @@ def select_best(
 
     for family, candidates in grouped.items():
         def sort_key(record: Dict[str, Any]) -> tuple[Any, ...]:
-            # Negative values make higher metrics sort first. The final lexical
-            # name tie-breaker is deterministic and declared in the README.
             return tuple(-metric_value(record, metric) for metric in ordered_metrics) + (
                 str(record["configuration_name"]),
             )
@@ -105,7 +104,9 @@ def flatten_dev_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "num_queries": record.get("num_queries"),
         "candidate_pool_size": record.get("candidate_pool_size"),
         "input_csv": record.get("input_csv"),
-        "configuration": json.dumps(record.get("configuration", {}), ensure_ascii=False, sort_keys=True),
+        "configuration": json.dumps(
+            record.get("configuration", {}), ensure_ascii=False, sort_keys=True
+        ),
         "metrics_path": record.get("metrics_path"),
     }
 
@@ -274,12 +275,17 @@ def write_ordering_comparison(
         comparison["rank_preserved"] = (
             comparison["old_table2_rank"].notna()
             & comparison["new_rank"].notna()
-            & (comparison["old_table2_rank"].astype("Int64") == comparison["new_rank"].astype("Int64"))
+            & (
+                comparison["old_table2_rank"].astype("Int64")
+                == comparison["new_rank"].astype("Int64")
+            )
         )
 
         old_families = set(old_df["family"].astype(str))
         evaluated_families = set(
-            comparison.loc[comparison["test_accuracy_at_1"].notna(), "family"].astype(str)
+            comparison.loc[
+                comparison["test_accuracy_at_1"].notna(), "family"
+            ].astype(str)
         )
         complete = old_families.issubset(evaluated_families)
         ordering_preserved = bool(comparison["rank_preserved"].all()) if complete else None
@@ -348,7 +354,10 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Select configurations on dev, evaluate one selected configuration per family on test, and compare Table 2 ordering."
+        description=(
+            "Select configurations on dev, evaluate one selected configuration "
+            "per family on test, and compare Table 2 ordering."
+        )
     )
     parser.add_argument("--dev_root", default="results/dev")
     parser.add_argument("--test_root", default="results/test")
@@ -360,7 +369,10 @@ if __name__ == "__main__":
         "--family",
         action="append",
         choices=sorted(SUPPORTED_EVALUATORS),
-        help="Family to evaluate on test. Repeat for multiple families. Without this option, all discovered supported families are evaluated.",
+        help=(
+            "Family to evaluate on test. Repeat for multiple families. Without "
+            "this option, all discovered supported families are evaluated."
+        ),
     )
     parser.add_argument("--evaluate_test", action="store_true")
     parser.add_argument(
