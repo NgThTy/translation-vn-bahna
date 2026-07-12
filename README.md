@@ -669,3 +669,83 @@ The patch validates syntax and the selection/authorization structure. It cannot
 run the complete 14-variant GPU experiment without your checkpoints, adapters,
 alignment matrices, model downloads, and hardware. You must execute the sweep
 and inspect the produced metrics on your server.
+
+# Full-encoder family: development-only selection
+
+This patch changes the full-encoder family so that the held-out test set is not
+used for model, checkpoint, preprocessing, or retrieval selection.
+
+## Declared search space
+
+The runner defines six training configurations covering:
+
+- sentence-mean and token-mean pooling;
+- MLP, linear, and identity projection choices;
+- projection dimensions 128 and 256;
+- symmetric and one-way InfoNCE;
+- temperatures 0.05 and 0.07;
+- learning rates 5e-6 and 1e-5.
+
+Each training run is continued to epoch 10 and evaluated on `data/dev.csv` at
+epochs 3, 5, and 10 with cosine and CSLS. Therefore, six expensive training
+runs produce 36 development-result configurations without retraining separately
+for every checkpoint/retrieval combination.
+
+The training policy is fixed as:
+
+```
+train_fit_only_no_dev_refit
+```
+
+`data/dev.csv` is used only for configuration/checkpoint selection. The final
+selected model is not refit on dev.
+
+## Two-hour jobs and two GPUs
+
+Submit the array job:
+
+```bash
+sbatch submit_full_encoder_contrastive_baseline.slurm
+```
+
+The array has six tasks and `%2` allows two tasks to run concurrently, one GPU
+per task. Re-submit the same array job until all tasks are complete. Each task
+uses `checkpoint_latest` to resume and skips completed development variants.
+
+A single local/server run can target one configuration:
+
+```bash
+FULL_ENCODER_CONFIG=token_mlp256_sym_t007_lr1e5 \
+  bash run_full_encoder_contrastive_baselines.sh
+```
+
+Check completion:
+
+```bash
+find results/dev/full_encoder -mindepth 2 -maxdepth 2 \
+  -name metrics.json -size +0c | wc -l
+```
+
+The declared grid produces 36 files.
+
+## Selection and one test evaluation
+
+After all development results exist:
+
+```bash
+sbatch submit_full_encoder_selection.slurm
+```
+
+or:
+
+```bash
+FULL_ENCODER_ACTION=select bash run_full_encoder_contrastive_baselines.sh
+```
+
+The shared selector rebuilds `results/dev_selection/selected_configs.json` from
+all families under `results/dev`, selects the full-encoder configuration by
+Top1 accuracy, MRR, Recall@5, and deterministic name tie-break, and evaluates
+only that selected configuration on `data/test.csv`.
+
+The evaluation script refuses a test command when the configuration name,
+checkpoint, or arguments differ from the selection manifest.

@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Select one configuration per family on dev and evaluate it once on test.
-
-Expected dev metric files are produced by the updated baseline scripts and live
-under ``results/dev/<family>/<configuration>/metrics.json``.
-"""
+"""Select one configuration per family on dev and evaluate it once on test."""
 
 from __future__ import annotations
 
@@ -25,6 +21,7 @@ SUPPORTED_EVALUATORS = {
     "ibm1": "src/word_alignment_baseline.py",
     "off_the_shelf": "src/multilingual_encoder_baseline.py",
     "xlmr_lora_projection": "src/previous_pipeline_baseline.py",
+    "full_encoder": "src/full_encoder_contrastive_finetune_baseline.py",
 }
 
 
@@ -41,9 +38,7 @@ def discover_dev_results(dev_root: Path) -> List[Dict[str, Any]]:
         metrics = load_json(metrics_path)
         if metrics.get("split") != "dev":
             continue
-        family = metrics.get("family")
-        configuration_name = metrics.get("configuration_name")
-        if not family or not configuration_name:
+        if not metrics.get("family") or not metrics.get("configuration_name"):
             continue
         record = dict(metrics)
         record["metrics_path"] = str(metrics_path)
@@ -53,9 +48,7 @@ def discover_dev_results(dev_root: Path) -> List[Dict[str, Any]]:
 
 def metric_value(record: Dict[str, Any], metric: str) -> float:
     value = record.get(metric)
-    if value is None:
-        return float("-inf")
-    return float(value)
+    return float("-inf") if value is None else float(value)
 
 
 def select_best(
@@ -67,13 +60,12 @@ def select_best(
     for record in records:
         grouped.setdefault(str(record["family"]), []).append(record)
 
-    selected: Dict[str, Dict[str, Any]] = {}
     ordered_metrics = [selection_metric] + [
         metric for metric in tie_breakers if metric != selection_metric
     ]
-
+    selected: Dict[str, Dict[str, Any]] = {}
     for family, candidates in grouped.items():
-        def sort_key(record: Dict[str, Any]) -> tuple[Any, ...]:
+        def sort_key(record: Dict[str, Any]):
             return tuple(-metric_value(record, metric) for metric in ordered_metrics) + (
                 str(record["configuration_name"]),
             )
@@ -95,45 +87,37 @@ def select_best(
     return selected
 
 
-def flatten_dev_record(record: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "family": record.get("family"),
-        "configuration_name": record.get("configuration_name"),
-        "Top1_acc": record.get("Top1_acc"),
-        "MRR": record.get("MRR"),
-        "Recall@5": record.get("Recall@5"),
-        "Recall@10": record.get("Recall@10"),
-        "num_queries": record.get("num_queries"),
-        "candidate_pool_size": record.get("candidate_pool_size"),
-        "input_csv": record.get("input_csv"),
-        "configuration": json.dumps(
-            record.get("configuration", {}), ensure_ascii=False, sort_keys=True
-        ),
-        "metrics_path": record.get("metrics_path"),
-    }
-
-
 def write_all_dev_variants(records: List[Dict[str, Any]], output_path: Path) -> None:
-    rows = [flatten_dev_record(record) for record in records]
-    columns = [
-        "family",
-        "configuration_name",
-        "Top1_acc",
-        "MRR",
-        "Recall@5",
-        "Recall@10",
-        "num_queries",
-        "candidate_pool_size",
-        "input_csv",
-        "configuration",
-        "metrics_path",
-    ]
+    rows = []
+    for record in records:
+        rows.append(
+            {
+                "family": record.get("family"),
+                "configuration_name": record.get("configuration_name"),
+                "Top1_acc": record.get("Top1_acc"),
+                "MRR": record.get("MRR"),
+                "Recall@5": record.get("Recall@5"),
+                "Recall@10": record.get("Recall@10"),
+                "num_queries": record.get("num_queries"),
+                "candidate_pool_size": record.get("candidate_pool_size"),
+                "input_csv": record.get("input_csv"),
+                "configuration": json.dumps(
+                    record.get("configuration", {}),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "metrics_path": record.get("metrics_path"),
+            }
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows, columns=columns).sort_values(
-        ["family", "Top1_acc", "MRR", "configuration_name"],
-        ascending=[True, False, False, True],
-        na_position="last",
-    ).to_csv(output_path, index=False)
+    frame = pd.DataFrame(rows)
+    if not frame.empty:
+        frame = frame.sort_values(
+            ["family", "Top1_acc", "MRR", "configuration_name"],
+            ascending=[True, False, False, True],
+            na_position="last",
+        )
+    frame.to_csv(output_path, index=False)
 
 
 def evaluate_selected_family(
@@ -142,7 +126,7 @@ def evaluate_selected_family(
     manifest_path: Path,
     test_csv: Path,
     test_root: Path,
-    force_test: bool = False,
+    force_test: bool,
 ) -> Path:
     if family not in selected:
         raise ValueError(f"No dev results found for requested family {family!r}")
@@ -152,16 +136,13 @@ def evaluate_selected_family(
     choice = selected[family]
     evaluator_script = choice.get("evaluator_script") or SUPPORTED_EVALUATORS.get(family)
     if not evaluator_script:
-        raise ValueError(f"No evaluator script is registered for family {family!r}")
+        raise ValueError(f"No evaluator registered for family {family!r}")
     evaluator_path = Path(evaluator_script)
     if not evaluator_path.is_file():
         raise FileNotFoundError(f"Evaluator script not found: {evaluator_path}")
-
     cli_args = choice.get("evaluation_cli_args")
     if not isinstance(cli_args, list):
-        raise ValueError(
-            f"Selected dev result for {family!r} does not contain evaluation_cli_args"
-        )
+        raise ValueError(f"Selected dev result for {family!r} has no evaluation_cli_args")
 
     configuration_name = str(choice["configuration_name"])
     output_dir = test_root / family / configuration_name
@@ -176,8 +157,8 @@ def evaluate_selected_family(
             print(f"Skipping existing authorized test result: {metrics_path}")
             return metrics_path
         raise RuntimeError(
-            f"Refusing to overwrite incompatible existing test result: {metrics_path}. "
-            "Pass --force_test only after reviewing the mismatch."
+            f"Refusing to overwrite incompatible test result: {metrics_path}. "
+            "Use --force_test only after reviewing the mismatch."
         )
 
     command = [
@@ -195,7 +176,6 @@ def evaluate_selected_family(
         str(output_dir),
         *[str(value) for value in cli_args],
     ]
-
     print("Running the single dev-selected test evaluation:")
     print(" ".join(command))
     subprocess.run(command, check=True)
@@ -210,7 +190,7 @@ def collect_test_results(
     for family, choice in sorted(selected.items()):
         configuration_name = str(choice["configuration_name"])
         metrics_path = test_root / family / configuration_name / "metrics.json"
-        metrics: Dict[str, Any] = load_json(metrics_path) if metrics_path.is_file() else {}
+        metrics = load_json(metrics_path) if metrics_path.is_file() else {}
         rows.append(
             {
                 "family": family,
@@ -230,19 +210,18 @@ def collect_test_results(
 def read_old_table2(path: Path) -> pd.DataFrame:
     old_df = pd.read_csv(path)
     if "family" not in old_df.columns:
-        raise ValueError(f"{path} must contain a 'family' column")
-
+        raise ValueError(f"{path} must contain a family column")
     if "old_table2_rank" not in old_df.columns:
-        score_columns = [
-            column
-            for column in ("old_test_accuracy_at_1", "test_accuracy_at_1", "Top1_acc")
-            if column in old_df.columns
-        ]
-        if not score_columns:
-            raise ValueError(
-                f"{path} must contain old_table2_rank or an old Accuracy@1 column"
-            )
-        score_column = score_columns[0]
+        score_column = next(
+            (
+                column
+                for column in ("old_test_accuracy_at_1", "test_accuracy_at_1", "Top1_acc")
+                if column in old_df.columns
+            ),
+            None,
+        )
+        if score_column is None:
+            raise ValueError(f"{path} must contain old_table2_rank or an Accuracy@1 column")
         old_df["old_table2_rank"] = old_df[score_column].rank(
             method="min", ascending=False
         ).astype("Int64")
@@ -260,7 +239,6 @@ def write_ordering_comparison(
         comparison["test_accuracy_at_1"], errors="coerce"
     ).rank(method="min", ascending=False).astype("Int64")
 
-    summary: Dict[str, Any]
     if old_table2_csv is None:
         comparison["old_table2_rank"] = pd.NA
         comparison["rank_preserved"] = pd.NA
@@ -271,23 +249,9 @@ def write_ordering_comparison(
         }
     else:
         old_df = read_old_table2(old_table2_csv)
-        old_columns = ["family", "old_table2_rank"]
-        old_score_column = next(
-            (
-                column
-                for column in ("old_test_accuracy_at_1", "test_accuracy_at_1", "Top1_acc")
-                if column in old_df.columns
-            ),
-            None,
+        comparison = comparison.merge(
+            old_df[["family", "old_table2_rank"]], on="family", how="left"
         )
-        if old_score_column is not None:
-            old_columns.append(old_score_column)
-        old_subset = old_df[old_columns].copy()
-        if old_score_column is not None and old_score_column != "old_test_accuracy_at_1":
-            old_subset = old_subset.rename(
-                columns={old_score_column: "old_test_accuracy_at_1"}
-            )
-        comparison = comparison.merge(old_subset, on="family", how="left")
         comparison["rank_preserved"] = (
             comparison["old_table2_rank"].notna()
             & comparison["new_rank"].notna()
@@ -296,7 +260,6 @@ def write_ordering_comparison(
                 == comparison["new_rank"].astype("Int64")
             )
         )
-
         old_families = set(old_df["family"].astype(str))
         evaluated_families = set(
             comparison.loc[
@@ -304,10 +267,9 @@ def write_ordering_comparison(
             ].astype(str)
         )
         complete = old_families.issubset(evaluated_families)
-        ordering_preserved = bool(comparison["rank_preserved"].all()) if complete else None
         summary = {
             "status": "complete" if complete else "not_computed_incomplete_family_coverage",
-            "ordering_preserved": ordering_preserved,
+            "ordering_preserved": bool(comparison["rank_preserved"].all()) if complete else None,
             "old_table2_family_count": len(old_families),
             "families_with_dev_selected_test_results": len(evaluated_families),
             "missing_families": sorted(old_families - evaluated_families),
@@ -330,10 +292,8 @@ def main(args: argparse.Namespace) -> None:
     records = discover_dev_results(dev_root)
     if not records:
         raise RuntimeError(f"No development metrics.json files found under {dev_root}")
-
     selected = select_best(records, args.selection_metric, args.tie_breakers)
     output_root.mkdir(parents=True, exist_ok=True)
-
     write_all_dev_variants(records, output_root / "all_dev_variants.csv")
     manifest_path.write_text(
         json.dumps(selected, ensure_ascii=False, indent=2) + "\n",
@@ -344,38 +304,30 @@ def main(args: argparse.Namespace) -> None:
         families = args.family if args.family else sorted(selected)
         for family in families:
             evaluate_selected_family(
-                family=family,
-                selected=selected,
-                manifest_path=manifest_path,
-                test_csv=Path(args.test_csv),
-                test_root=test_root,
-                force_test=args.force_test,
+                family,
+                selected,
+                manifest_path,
+                Path(args.test_csv),
+                test_root,
+                args.force_test,
             )
 
     test_results = collect_test_results(selected, test_root)
     test_results.to_csv(output_root / "dev_selected_test_results.csv", index=False)
-
-    old_table2_path = Path(args.old_table2_csv) if args.old_table2_csv else None
     write_ordering_comparison(
-        test_results=test_results,
-        output_csv=output_root / "table2_ordering_comparison.csv",
-        summary_json=output_root / "table2_ordering_summary.json",
-        old_table2_csv=old_table2_path,
+        test_results,
+        output_root / "table2_ordering_comparison.csv",
+        output_root / "table2_ordering_summary.json",
+        Path(args.old_table2_csv) if args.old_table2_csv else None,
     )
 
     print(f"Saved all dev variants to {output_root / 'all_dev_variants.csv'}")
     print(f"Saved selected configurations to {manifest_path}")
     print(f"Saved dev-selected test results to {output_root / 'dev_selected_test_results.csv'}")
-    print(f"Saved ordering comparison to {output_root / 'table2_ordering_comparison.csv'}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description=(
-            "Select configurations on dev, evaluate one selected configuration "
-            "per family on test, and compare Table 2 ordering."
-        )
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument("--dev_root", default="results/dev")
     parser.add_argument("--test_root", default="results/test")
     parser.add_argument("--output_root", default="results/dev_selection")
@@ -383,24 +335,9 @@ if __name__ == "__main__":
     parser.add_argument("--selection_metric", default="Top1_acc")
     parser.add_argument("--tie_breakers", nargs="+", default=list(DEFAULT_TIE_BREAKERS))
     parser.add_argument(
-        "--family",
-        action="append",
-        choices=sorted(SUPPORTED_EVALUATORS),
-        help=(
-            "Family to evaluate on test. Repeat for multiple families. Without "
-            "this option, all discovered supported families are evaluated."
-        ),
+        "--family", action="append", choices=sorted(SUPPORTED_EVALUATORS)
     )
     parser.add_argument("--evaluate_test", action="store_true")
-    parser.add_argument(
-        "--force_test",
-        action="store_true",
-        help="Overwrite an existing test result for the selected configuration.",
-    )
-    parser.add_argument(
-        "--old_table2_csv",
-        default=None,
-        help="CSV containing family plus old_table2_rank or old Accuracy@1 values.",
-    )
+    parser.add_argument("--force_test", action="store_true")
+    parser.add_argument("--old_table2_csv", default=None)
     main(parser.parse_args())
-
