@@ -428,3 +428,244 @@ results/test/off_the_shelf/<one-selected-configuration>/
 results/dev_selection/selected_configs.json
 results/dev_selection/dev_selected_test_results.csv
 ```
+
+# XLM-R LoRA projection: development-selected evaluation
+
+This patch converts the XLM-R LoRA/projection/Kabsch experiments from
+**test-set model selection** to **development-set model selection**.
+
+## Data policy
+
+- `data/train_fit.csv`: train LoRA adapters and projection heads; fit any learned alignment artifacts.
+- `data/dev.csv`: compare all architecture, preprocessing, pooling, Kabsch, retrieval, epoch, sample-size, and hyperparameter variants.
+- `data/test.csv`: evaluate only the exact development-selected configuration.
+- Final-model policy: `train_fit_only_no_dev_refit`.
+
+The updated training script writes `training_manifest.json`. The evaluator
+requires this manifest by default, so a legacy checkpoint trained on the original
+`data/train.csv` cannot silently be reported as reviewer-compliant.
+
+## Files
+
+- `src/previous_pipeline_baseline.py`: dev/test evaluator with exact test authorization.
+- `src/lora_projection_generalization_train_eval.py`: train on `train_fit`, save provenance and resumable epoch checkpoints, evaluate on dev only.
+- `src/select_dev_configs_and_evaluate_test.py`: registers the `xlmr_lora_projection` family.
+- `run_previous_pipeline_variant.sh`: shared resumable variant runner.
+- `run_previous_pipeline_baselines.sh`: six core variants.
+- `run_previous_pipeline_additional_experiments.sh`: four no-Kabsch pooling variants.
+- `run_previous_pipeline_clarification_experiments.sh`: two sentence-mean Kabsch variants.
+- `run_previous_pipeline_token_level_kabsch_experiments.sh`: two token-level Kabsch variants.
+- `run_previous_pipeline_dev_selection.sh`: verifies the 14-variant sweep, selects on dev, and performs one test evaluation.
+
+## The 14 unique default variants
+
+The old clarification script duplicated two token-mean variants already present
+in the main baseline script. The new sweep keeps 14 unique configurations:
+
+1. sentence-level Kabsch, token mean, cosine
+2. sentence-level Kabsch, token mean, CSLS
+3. no Kabsch, token mean, cosine
+4. no Kabsch, token mean, CSLS
+5. sentence-level Kabsch, token IDF, cosine
+6. sentence-level Kabsch, token IDF, CSLS
+7. no Kabsch, token IDF, cosine
+8. no Kabsch, token IDF, CSLS
+9. sentence-level Kabsch, sentence mean, cosine
+10. sentence-level Kabsch, sentence mean, CSLS
+11. no Kabsch, sentence mean, cosine
+12. no Kabsch, sentence mean, CSLS
+13. token-level Kabsch, token mean, CSLS
+14. token-level Kabsch, token IDF, CSLS
+
+All are written under:
+
+```text
+results/dev/xlmr_lora_projection/<configuration>/
+```
+
+Only the development winner is written under:
+
+```text
+results/test/xlmr_lora_projection/<selected-configuration>/
+```
+
+## 1. Retrain checkpoints on train_fit
+
+A checkpoint trained on the original `data/train.csv` has seen rows now assigned
+to `data/dev.csv`, so it should not be used for the reviewer-response result.
+Train a replacement checkpoint:
+
+```bash
+python src/lora_projection_generalization_train_eval.py \
+  --train_csv data/train_fit.csv \
+  --dev_csv data/dev.csv \
+  --checkpoint_dir results/models/reviewer_xlmr_50ep \
+  --dev_output_root results/dev/xlmr_lora_projection \
+  --configuration_prefix trainfit_xlmr_50ep_token_mean_no_kabsch \
+  --pooling token_mean \
+  --epochs 50 \
+  --batch_size 16 \
+  --eval_batch_size 8 \
+  --grad_accum_steps 2 \
+  --eval_retrievals both \
+  --embedding_cache_dir results/cache/xlmr_lora_projection_embeddings
+```
+
+The final checkpoint is:
+
+```text
+results/models/reviewer_xlmr_50ep/checkpoint_final/
+```
+
+It contains:
+
+```text
+src_proj.pt
+tgt_proj.pt
+src_adapters/
+tgt_adapters/
+training_manifest.json
+```
+
+Set the runner environment to that directory:
+
+```bash
+export PROJ_DIR=results/models/reviewer_xlmr_50ep/checkpoint_final
+```
+
+### Selecting epoch count, sample size, and LoRA hyperparameters
+
+Run additional training configurations on the same `train_fit/dev` split. For
+example, compare 10 and 20 epochs:
+
+```bash
+python src/lora_projection_generalization_train_eval.py \
+  --train_csv data/train_fit.csv \
+  --dev_csv data/dev.csv \
+  --checkpoint_dir results/models/reviewer_xlmr_10ep \
+  --configuration_prefix trainfit_xlmr_10ep_token_mean_no_kabsch \
+  --epochs 10 \
+  --pooling token_mean \
+  --eval_retrievals both
+
+python src/lora_projection_generalization_train_eval.py \
+  --train_csv data/train_fit.csv \
+  --dev_csv data/dev.csv \
+  --checkpoint_dir results/models/reviewer_xlmr_20ep \
+  --configuration_prefix trainfit_xlmr_20ep_token_mean_no_kabsch \
+  --epochs 20 \
+  --pooling token_mean \
+  --eval_retrievals both
+```
+
+Use `--train_sample_size`, `--lora_r`, `--lora_alpha`, `--projection_dim`,
+`--lr`, or `--temperature` for additional declared variants. Their development
+metrics are automatically discovered by the central selector.
+
+### Resume after a wall-time limit
+
+Each completed epoch is saved as:
+
+```text
+results/models/reviewer_xlmr_50ep/checkpoint_epoch_<N>/
+```
+
+Resume from an epoch checkpoint:
+
+```bash
+python src/lora_projection_generalization_train_eval.py \
+  ...same arguments... \
+  --resume_from results/models/reviewer_xlmr_50ep/checkpoint_epoch_12
+```
+
+## 2. Refit Kabsch without dev/test leakage
+
+`R.npy` and `t.npy` must be learned from `train_fit.csv` or from an independent
+training lexicon that contains no development or test pairs. Use the repository's
+alignment-training code to rebuild them. Place an `alignment_manifest.json` in
+the alignment directory with at least:
+
+```json
+{
+  "fit_policy": "train_fit_only",
+  "fit_csv": "data/train_fit.csv",
+  "fit_csv_sha256": "<sha256>",
+  "alignment_sample_size": 10000
+}
+```
+
+Then set:
+
+```bash
+export ALIGN_DIR=results/alignment/reviewer_xlmr_10K_50ep_train_fit
+export REQUIRE_ALIGNMENT_MANIFEST=1
+```
+
+Without an alignment manifest, the evaluator records hashes of `R.npy` and
+`t.npy` but warns that provenance could not be verified.
+
+## 3. Run development variants
+
+The scripts are resumable: a configuration is skipped only when its
+`metrics.json` exists and is nonempty.
+
+```bash
+bash run_previous_pipeline_baselines.sh
+bash run_previous_pipeline_additional_experiments.sh
+bash run_previous_pipeline_clarification_experiments.sh
+bash run_previous_pipeline_token_level_kabsch_experiments.sh
+```
+
+For short server allocations, run one variant per job:
+
+```bash
+XLMR_VARIANT=previous_pipeline_xlmr_50ep_10K_kabsch_token_mean_csls_lora \
+  bash run_previous_pipeline_baselines.sh
+```
+
+Do not remove `results/dev/xlmr_lora_projection` between jobs.
+
+## 4. Select on dev and evaluate once on test
+
+After all 14 default variants are complete:
+
+```bash
+bash run_previous_pipeline_dev_selection.sh
+```
+
+This command:
+
+1. verifies the 14 required development results;
+2. scans all valid families under `results/dev`;
+3. selects the XLM-R LoRA winner by `Top1_acc`, then `MRR`, then `Recall@5`, then configuration name;
+4. rewrites the shared consolidated `selected_configs.json`; and
+5. evaluates exactly the selected XLM-R LoRA configuration on test.
+
+An existing compatible test result is skipped. To deliberately rerun it:
+
+```bash
+FORCE_TEST=1 bash run_previous_pipeline_dev_selection.sh
+```
+
+## 5. Inspect results
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+selection = json.loads(
+    Path("results/dev_selection/selected_configs.json").read_text()
+)
+print(json.dumps(selection["xlmr_lora_projection"], indent=2))
+PY
+
+find results/test/xlmr_lora_projection -name metrics.json -print
+```
+
+## Important limitation
+
+The patch validates syntax and the selection/authorization structure. It cannot
+run the complete 14-variant GPU experiment without your checkpoints, adapters,
+alignment matrices, model downloads, and hardware. You must execute the sweep
+and inspect the produced metrics on your server.

@@ -24,6 +24,7 @@ SUPPORTED_EVALUATORS = {
     "fasttext_procrustes": "src/fasttext_procrustes_baseline.py",
     "ibm1": "src/word_alignment_baseline.py",
     "off_the_shelf": "src/multilingual_encoder_baseline.py",
+    "xlmr_lora_projection": "src/previous_pipeline_baseline.py",
 }
 
 
@@ -141,6 +142,7 @@ def evaluate_selected_family(
     manifest_path: Path,
     test_csv: Path,
     test_root: Path,
+    force_test: bool = False,
 ) -> Path:
     if family not in selected:
         raise ValueError(f"No dev results found for requested family {family!r}")
@@ -164,6 +166,19 @@ def evaluate_selected_family(
     configuration_name = str(choice["configuration_name"])
     output_dir = test_root / family / configuration_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = output_dir / "metrics.json"
+    if metrics_path.is_file() and not force_test:
+        existing = load_json(metrics_path)
+        if (
+            existing.get("split") == "test"
+            and existing.get("configuration_name") == configuration_name
+        ):
+            print(f"Skipping existing authorized test result: {metrics_path}")
+            return metrics_path
+        raise RuntimeError(
+            f"Refusing to overwrite incompatible existing test result: {metrics_path}. "
+            "Pass --force_test only after reviewing the mismatch."
+        )
 
     command = [
         sys.executable,
@@ -184,7 +199,7 @@ def evaluate_selected_family(
     print("Running the single dev-selected test evaluation:")
     print(" ".join(command))
     subprocess.run(command, check=True)
-    return output_dir / "metrics.json"
+    return metrics_path
 
 
 def collect_test_results(
@@ -334,6 +349,7 @@ def main(args: argparse.Namespace) -> None:
                 manifest_path=manifest_path,
                 test_csv=Path(args.test_csv),
                 test_root=test_root,
+                force_test=args.force_test,
             )
 
     test_results = collect_test_results(selected, test_root)
@@ -376,6 +392,11 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument("--evaluate_test", action="store_true")
+    parser.add_argument(
+        "--force_test",
+        action="store_true",
+        help="Overwrite an existing test result for the selected configuration.",
+    )
     parser.add_argument(
         "--old_table2_csv",
         default=None,
