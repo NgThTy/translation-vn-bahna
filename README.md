@@ -749,3 +749,450 @@ only that selected configuration on `data/test.csv`.
 
 The evaluation script refuses a test command when the configuration name,
 checkpoint, or arguments differ from the selection manifest.
+
+# Hybrid IBM1 + XLM-R LoRA development selection
+
+This patch converts the hybrid reranking family to the same reviewer-compliant
+protocol as the other families:
+
+1. IBM1 is selected using the IBM1 family results on `data/dev.csv`.
+2. The XLM-R LoRA candidate generator is selected using the XLM-R family
+   results on `data/dev.csv`.
+3. Only those two development-selected components are used to build the hybrid.
+4. Hybrid-only choices are tuned on `data/dev.csv`.
+5. Exactly one selected hybrid configuration is evaluated on `data/test.csv`.
+
+The old directory
+
+```text
+results/baselines/hybrid_ibm1_xlmr_lora_no_kabsch_csls_rerank_test_fixed
+```
+
+must not be treated as final reviewer-response evidence when its components or
+weights were chosen using test performance.
+
+## Files
+
+```text
+src/hybrid_lexical_neural_rerank.py
+src/select_dev_configs_and_evaluate_test.py
+src/previous_pipeline_baseline.py
+run_hybrid_rerank.sh
+```
+
+`previous_pipeline_baseline.py` now writes `TopK_indices` and `TopK_Scores` in
+addition to `TopK_Preds`. Candidate indices avoid ambiguity when Vietnamese
+sentences are duplicated, while raw neural scores permit direct score
+interpolation. Older neural prediction files remain usable through rank-based
+neural scores.
+
+## Prerequisites
+
+Complete development selection for both component families first:
+
+```text
+results/dev/ibm1/<configuration>/metrics.json
+results/dev/xlmr_lora_projection/<configuration>/metrics.json
+```
+
+The selected XLM-R development directory must also contain:
+
+```text
+sentence_predictions.csv
+```
+
+The hybrid script reads the selected component names and configurations from:
+
+```text
+results/dev_selection/selected_configs.json
+```
+
+It does not accept arbitrary IBM1 or neural components.
+
+## Apply the patch
+
+```bash
+unzip hybrid_dev_selection_patch.zip
+
+cp hybrid_dev_selection_patch/src/hybrid_lexical_neural_rerank.py src/
+cp hybrid_dev_selection_patch/src/select_dev_configs_and_evaluate_test.py src/
+cp hybrid_dev_selection_patch/src/previous_pipeline_baseline.py src/
+cp hybrid_dev_selection_patch/run_hybrid_rerank.sh .
+```
+
+Validate syntax:
+
+```bash
+python -m py_compile \
+  src/hybrid_lexical_neural_rerank.py \
+  src/select_dev_configs_and_evaluate_test.py \
+  src/previous_pipeline_baseline.py
+
+bash -n run_hybrid_rerank.sh
+```
+
+The IBM cache should normally be ignored by Git:
+
+```gitignore
+results/cache/hybrid_ibm1/
+```
+
+## Run the complete hybrid workflow
+
+```bash
+bash run_hybrid_rerank.sh
+```
+
+This performs the following sequence:
+
+1. Rebuild the shared selection manifest from all current development results.
+2. Confirm that `ibm1` and `xlmr_lora_projection` have development-selected
+   configurations.
+3. Train or load the selected IBM1 model using only `data/train_fit.csv`.
+4. Load development candidates from the selected XLM-R configuration.
+5. Evaluate the declared hybrid grid on `data/dev.csv`.
+6. Rebuild the shared manifest so it contains the selected hybrid.
+7. Ensure that the already-selected XLM-R configuration has produced its one
+   authorized test candidate file.
+8. Evaluate exactly one selected hybrid configuration on `data/test.csv`.
+
+Run only development tuning:
+
+```bash
+HYBRID_ACTION=dev bash run_hybrid_rerank.sh
+```
+
+Run only the final selected test evaluation after development tuning:
+
+```bash
+HYBRID_ACTION=test bash run_hybrid_rerank.sh
+```
+
+## Default hybrid search space
+
+The base component choices are fixed to the development winners:
+
+```text
+IBM1 component: selected_configs.json["ibm1"]
+Neural component: selected_configs.json["xlmr_lora_projection"]
+```
+
+The hybrid-only grid covers:
+
+```text
+candidate top-k:       5, 10
+neural score:          raw score, reciprocal rank
+normalization:         min-max, rank
+reranking formula:     weighted sum, weighted product
+length penalty:        0.0, 0.1
+weights (a,b,g):       (1,0,0)
+                       (0.75,0.25,0)
+                       (0.5,0.5,0)
+                       (0.25,0.75,0)
+                       (0,1,0)
+                       (0.5,0.4,0.1)
+```
+
+Here:
+
+```text
+final score = neural contribution + IBM1 contribution + optional string contribution
+alpha = neural weight
+beta  = IBM1 weight
+gamma = SequenceMatcher string-similarity weight
+```
+
+When `TopK_Scores` is available, the default grid contains 192 configurations.
+When an older neural prediction file has no raw scores, the script excludes the
+raw-score mode and evaluates 96 rank-based configurations. This behavior is
+recorded in `search_manifest.json` and every `metrics.json`.
+
+The central selector chooses with:
+
+```text
+Top1_acc
+→ MRR
+→ Recall@5
+→ configuration name
+```
+
+## Result structure
+
+Development grid:
+
+```text
+results/dev/hybrid/
+├── hybrid_dev_grid.csv
+├── search_manifest.json
+├── hybrid_k5_.../
+│   └── metrics.json
+└── hybrid_k10_.../
+    └── metrics.json
+```
+
+The development winner also receives a prediction file for auditing:
+
+```text
+results/dev/hybrid/<best-configuration>/sentence_predictions.csv
+```
+
+Final test output contains exactly one selected configuration:
+
+```text
+results/test/hybrid/<selected-configuration>/
+├── metrics.json
+└── sentence_predictions.csv
+```
+
+Consolidated selection files remain under:
+
+```text
+results/dev_selection/
+├── selected_configs.json
+├── all_dev_variants.csv
+├── dev_selected_test_results.csv
+├── table2_ordering_comparison.csv
+└── table2_ordering_summary.json
+```
+
+## IBM1 fitting policy
+
+The policy is fixed as:
+
+```text
+train_fit_only_no_dev_refit
+```
+
+IBM1 is trained only on `data/train_fit.csv`. `data/dev.csv` is used only for
+component selection and hybrid parameter tuning. `data/test.csv` is read only
+after the hybrid configuration has been frozen in the shared manifest.
+
+The complete IBM translation tables are cached under:
+
+```text
+results/cache/hybrid_ibm1/
+```
+
+The cache key includes the SHA-256 hash of `train_fit.csv` and the selected IBM1
+configuration, so stale models are not silently reused after data or
+preprocessing changes.
+
+## Test guard
+
+The final test evaluator verifies all of the following against
+`selected_configs.json`:
+
+- hybrid configuration name;
+- selected IBM1 component and its preprocessing/method;
+- selected XLM-R component;
+- candidate top-k;
+- neural score representation;
+- normalization;
+- reranking formula;
+- interpolation weights;
+- length penalty.
+
+A direct test command with different arguments is rejected.
+
+## Raw neural score support
+
+After replacing `previous_pipeline_baseline.py`, newly generated XLM-R
+prediction files contain:
+
+```text
+TopK_Preds
+TopK_indices
+TopK_Scores
+```
+
+If the selected development prediction file was created before this patch, the
+hybrid script prints a warning and tunes only rank-based neural scores. To also
+compare raw-score interpolation, rerun the same already-selected XLM-R
+development configuration with the updated evaluator. This does not change the
+selected neural configuration; it only regenerates its prediction artifact.
+
+# Hybrid IBM1–XLM-R LoRA stage-order patch
+
+This patch turns the stage order into a development-selected hybrid choice.
+It compares:
+
+1. `neural_first`: XLM-R LoRA generates top-k candidates, then IBM1 and neural
+   scores rerank them.
+2. `ibm1_first`: IBM1 generates top-k candidates from the full candidate pool,
+   then XLM-R LoRA and IBM1 scores rerank them.
+
+The held-out test set is used only once, for the single hybrid configuration
+selected on development data.
+
+## Files
+
+```text
+src/hybrid_lexical_neural_rerank.py
+src/previous_pipeline_baseline.py
+src/word_alignment_baseline.py
+src/select_dev_configs_and_evaluate_test.py
+run_hybrid_rerank.sh
+run_word_alignment_baselines.sh
+```
+
+## Base-artifact changes
+
+`word_alignment_baseline.py` now saves:
+
+```text
+TopK_Preds
+TopK_indices
+TopK_Scores
+```
+
+`previous_pipeline_baseline.py` now saves the same top-k fields plus:
+
+```text
+retrieval_embeddings.npz
+```
+
+The embedding archive contains the exact source and target embeddings used by
+the selected XLM-R retrieval configuration. The hybrid evaluator uses them to
+score IBM1-first candidates that may not appear in XLM-R's original top-k.
+
+## Apply
+
+From the repository root:
+
+```bash
+cp hybrid_stage_order_dev_selection_patch/src/hybrid_lexical_neural_rerank.py src/
+cp hybrid_stage_order_dev_selection_patch/src/previous_pipeline_baseline.py src/
+cp hybrid_stage_order_dev_selection_patch/src/word_alignment_baseline.py src/
+cp hybrid_stage_order_dev_selection_patch/src/select_dev_configs_and_evaluate_test.py src/
+cp hybrid_stage_order_dev_selection_patch/run_hybrid_rerank.sh .
+cp hybrid_stage_order_dev_selection_patch/run_word_alignment_baselines.sh .
+```
+
+Validate:
+
+```bash
+python -m py_compile \
+  src/hybrid_lexical_neural_rerank.py \
+  src/previous_pipeline_baseline.py \
+  src/word_alignment_baseline.py \
+  src/select_dev_configs_and_evaluate_test.py
+
+bash -n run_hybrid_rerank.sh
+bash -n run_word_alignment_baselines.sh
+```
+
+## Run development selection
+
+The selected IBM1 and XLM-R development configurations must already exist in:
+
+```text
+results/dev_selection/selected_configs.json
+```
+
+Then run:
+
+```bash
+HYBRID_ACTION=dev bash run_hybrid_rerank.sh
+```
+
+The runner checks the selected base artifacts. When an old selected result lacks
+`TopK_indices`, `TopK_Scores`, or `retrieval_embeddings.npz`, it reruns only
+that already-selected development configuration. It does not rerun all IBM1 or
+XLM-R variants and does not change base-family selection.
+
+The default search has:
+
+```text
+2 stage orders
+× 2 candidate top-k values
+× 2 neural score modes
+× 2 normalization modes
+× 2 formulas
+× 2 length penalties
+× 6 weight settings
+= 384 development configurations
+```
+
+These configurations reuse cached IBM1 tables and a cached full XLM-R score
+matrix.
+
+## Run selected test evaluation
+
+After development selection:
+
+```bash
+HYBRID_ACTION=test bash run_hybrid_rerank.sh
+```
+
+The runner first ensures that the single development-selected IBM1 and XLM-R
+base configurations have authorized test artifacts. It then evaluates only the
+single selected hybrid stage order and parameter configuration.
+
+The complete workflow is:
+
+```bash
+bash run_hybrid_rerank.sh
+```
+
+## Main outputs
+
+```text
+results/dev/hybrid/hybrid_dev_grid.csv
+results/dev/hybrid/stage_order_comparison.csv
+results/dev/hybrid/search_manifest.json
+results/dev/hybrid/<configuration>/metrics.json
+results/test/hybrid/<selected-configuration>/metrics.json
+results/test/hybrid/<selected-configuration>/sentence_predictions.csv
+```
+
+`stage_order_comparison.csv` keeps the best development configuration for each
+stage order and candidate top-k. It reports first-stage recall/accuracy and
+final reranked accuracy/MRR, which directly supports the reviewer response.
+
+Each hybrid `metrics.json` retains top-level `Top1_acc`, `MRR`, and `Recall@5`
+for the central selector, and also records:
+
+```text
+candidate_generator
+first_stage_metrics
+final_metrics
+reranking_gain
+first_stage_recall_at_k
+rerank_top1_gain
+rerank_mrr_gain
+```
+
+## Two-hour server limit
+
+The IBM1 runner is resumable. Run one missing IBM1 variant per allocation:
+
+```bash
+IBM1_VARIANT=ibm1_sym_strip_accents_no_punct \
+  bash run_word_alignment_baselines.sh
+```
+
+Completed variants are skipped and are never deleted.
+
+The hybrid grid itself does not train XLM-R. Its expensive reusable artifacts
+are built once and cached under:
+
+```text
+results/cache/hybrid_ibm1/
+results/cache/hybrid_neural_scores/
+```
+
+Add both directories to `.gitignore` when caches should not be versioned.
+
+## Suggested reviewer explanation
+
+> We use the XLM-R LoRA model as the first-stage candidate generator because
+> the first stage is recall-oriented. The dense encoder captures sentence-level
+> semantic similarity despite differences in surface form, word order, or
+> incomplete lexical overlap, while IBM1 provides a complementary lexical
+> consistency signal among retained candidates. To test this rationale rather
+> than assume it, we additionally evaluate the reverse IBM1-first pipeline on
+> the development set with identical candidate sizes and reranking choices. The
+> stage order and all hybrid hyperparameters are selected only on development
+> data, followed by one evaluation of the selected pipeline on the held-out test
+> set.
+
