@@ -1,0 +1,38 @@
+#!/bin/bash
+#PBS -P CFP01-CF-060
+#PBS -j oe
+#PBS -k oed
+#PBS -N bahna-full-encoder
+#PBS -q auto
+#PBS -l select=1:ncpus=8:ngpus=1
+#PBS -l walltime=02:00:00
+
+# Change to working directory
+cd $PBS_O_WORKDIR
+
+image="/app1/common/singularity-img/hopper/cuda/cuda_12.1.0-cudnn8-devel-u20.04.sif"
+
+module load singularity
+
+# Check if required environment variables are set
+if [ -z "$FULL_ENCODER_CONFIG" ]; then
+    echo "ERROR: FULL_ENCODER_CONFIG not set"
+    exit 1
+fi
+
+BASE_LOG_DIR=/scratch/e1583535/translation-vn-bahna/logs/full-encoder-contrastive
+
+mkdir -p $BASE_LOG_DIR
+
+singularity exec -e \
+--env HF_HOME=/scratch/e1583535/cache \
+--env HF_DATASETS_CACHE=/scratch/e1583535/cache/datasets \
+$image bash << EOF > $BASE_LOG_DIR/stdout.$PBS_JOBID.log 2> $BASE_LOG_DIR/stderr.$PBS_JOBID.log
+
+source /scratch/e1583535/virtualenvs/bana/bin/activate
+
+cd /scratch/e1583535/translation-vn-bahna
+
+FULL_ENCODER_CONFIG=$FULL_ENCODER_CONFIG MAX_RUNTIME_MINUTES=105 bash run_full_encoder_contrastive_baselines.sh
+
+EOF
