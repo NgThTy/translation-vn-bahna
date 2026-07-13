@@ -1,0 +1,5 @@
+candidate_generator,candidate_topk,configuration_name,first_stage_Top1_acc,first_stage_MRR,first_stage_Recall_at_k,Top1_acc,MRR,Recall@5,Recall@10,rerank_top1_gain,rerank_mrr_gain,neural_score_mode,normalization,formula,alpha,beta,gamma,length_penalty
+ibm1_first,5,hybrid_ibm1_first_k5_reciprocal_rank_minmax_weighted_product_a0p5_b0p5_g0_lp0p1_89a1103c7b,0.408,0.4715,0.5741,0.5229,0.5452,0.5741,0.5741,0.1149,0.0737,reciprocal_rank,minmax,weighted_product,0.5,0.5,0.0,0.1
+ibm1_first,10,hybrid_ibm1_first_k10_raw_minmax_weighted_sum_a0p75_b0p25_g0_lp0p1_1200ebd6ec,0.408,0.4781,0.6213,0.5481,0.578,0.6173,0.6213,0.1402,0.1,raw,minmax,weighted_sum,0.75,0.25,0.0,0.1
+neural_first,5,hybrid_neural_first_k5_raw_minmax_weighted_product_a0p25_b0p75_g0_lp0p1_954831afcb,0.5089,0.5839,0.7062,0.5972,0.6394,0.7062,0.7062,0.0884,0.0555,raw,minmax,weighted_product,0.25,0.75,0.0,0.1
+neural_first,10,hybrid_neural_first_k10_raw_minmax_weighted_sum_a0p25_b0p75_g0_lp0p1_dc003f4a17,0.5089,0.5922,0.7678,0.6132,0.6673,0.7403,0.7678,0.1044,0.0751,raw,minmax,weighted_sum,0.25,0.75,0.0,0.1

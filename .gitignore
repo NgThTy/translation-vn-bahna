@@ -61,6 +61,7 @@ results/**/src_encoder/
 results/**/tgt_encoder/
 results/**/src_adapters/
 results/**/tgt_adapters/
+results/cache/
 
 # Microsoft Office temporary files
 ~$*.docx

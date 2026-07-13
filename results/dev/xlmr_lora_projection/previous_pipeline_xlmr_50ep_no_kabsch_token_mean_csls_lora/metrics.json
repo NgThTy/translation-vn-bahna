@@ -111,6 +111,8 @@
   "retrieval": "csls",
   "device": "cuda",
   "embedding_cache": "results/cache/xlmr_lora_projection_embeddings/0d5673c092b8163e1806dbbe8eeb.npz",
+  "retrieval_embeddings": "results/dev/xlmr_lora_projection/previous_pipeline_xlmr_50ep_no_kabsch_token_mean_csls_lora/retrieval_embeddings.npz",
+  "retrieval_embeddings_sha256": "aec06271ae3e9c15bf8a71a71ba405531957c16d266d1b6f6100d03a6219b6c9",
   "selection_policy": "dev_only_then_single_test_evaluation",
   "training_policy": "train_fit_only_no_dev_refit"
 }
