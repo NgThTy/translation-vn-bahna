@@ -22,6 +22,7 @@ SUPPORTED_EVALUATORS = {
     "off_the_shelf": "src/multilingual_encoder_baseline.py",
     "xlmr_lora_projection": "src/previous_pipeline_baseline.py",
     "full_encoder": "src/full_encoder_contrastive_finetune_baseline.py",
+    "hybrid": "src/hybrid_lexical_neural_rerank.py",
 }
 
 
