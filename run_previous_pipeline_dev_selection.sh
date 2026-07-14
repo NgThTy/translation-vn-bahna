@@ -56,3 +56,15 @@ if [[ "${FORCE_TEST:-0}" == "1" ]]; then
 fi
 
 python src/select_dev_configs_and_evaluate_test.py "${selector_args[@]}"
+
+
+
+
+
+
+
+
+
+
+
+

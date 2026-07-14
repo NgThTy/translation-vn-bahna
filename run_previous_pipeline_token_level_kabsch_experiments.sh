@@ -133,6 +133,53 @@
 
 
 
+# #!/usr/bin/env bash
+# set -euo pipefail
+
+# # Token-level Kabsch variants, evaluated on dev only. The previous script ran
+# # only CSLS; this version makes the reviewer-requested controlled comparison
+# # against cosine and ratio margin as well.
+
+# NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+# RETRIEVALS=(cosine csls margin_ratio)
+# BASE_VARIANTS=(
+#   previous_pipeline_xlmr_50ep_10K_token_kabsch_token_mean
+#   previous_pipeline_xlmr_50ep_10K_token_kabsch_token_idf
+# )
+
+# run_variant() {
+#   local variant="$1"
+#   NEIGHBORHOOD_K="$NEIGHBORHOOD_K" \
+#     bash run_previous_pipeline_variant.sh "$variant"
+# }
+
+# if [[ -n "${XLMR_VARIANT:-}" ]]; then
+#   run_variant "$XLMR_VARIANT"
+#   exit 0
+# fi
+
+# for base_variant in "${BASE_VARIANTS[@]}"; do
+#   for retrieval in "${RETRIEVALS[@]}"; do
+#     run_variant "${base_variant}_${retrieval}_lora"
+#   done
+# done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -140,15 +187,29 @@ set -euo pipefail
 # only CSLS; this version makes the reviewer-requested controlled comparison
 # against cosine and ratio margin as well.
 
+PROJ_DIR="${PROJ_DIR:-results/models/reviewer_xlmr_50ep/checkpoint_final}"
+ALIGN_DIR="${ALIGN_DIR:-results/alignment/reviewer_xlmr_10K_50ep_train_fit}"
 NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+
 RETRIEVALS=(cosine csls margin_ratio)
 BASE_VARIANTS=(
   previous_pipeline_xlmr_50ep_10K_token_kabsch_token_mean
   previous_pipeline_xlmr_50ep_10K_token_kabsch_token_idf
 )
 
+if [[ ! -f "$PROJ_DIR/training_manifest.json" ]]; then
+  echo "Missing reviewer-compliant checkpoint manifest:" >&2
+  echo "  $PROJ_DIR/training_manifest.json" >&2
+  echo "Set PROJ_DIR to the directory containing the verified checkpoint." >&2
+  exit 1
+fi
+
 run_variant() {
   local variant="$1"
+
+  PROJ_DIR="$PROJ_DIR" \
+  ALIGN_DIR="$ALIGN_DIR" \
+  REQUIRE_ALIGNMENT_MANIFEST=1 \
   NEIGHBORHOOD_K="$NEIGHBORHOOD_K" \
     bash run_previous_pipeline_variant.sh "$variant"
 }
@@ -163,3 +224,5 @@ for base_variant in "${BASE_VARIANTS[@]}"; do
     run_variant "${base_variant}_${retrieval}_lora"
   done
 done
+
+

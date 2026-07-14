@@ -176,18 +176,72 @@
 
 
 
+# #!/usr/bin/env bash
+# set -euo pipefail
+
+# # Sentence-mean Kabsch clarification variants, evaluated on dev only.
+# # The token-mean Kabsch variants are part of run_previous_pipeline_baselines.sh.
+
+# NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+# RETRIEVALS=(cosine csls margin_ratio)
+# BASE_VARIANT="previous_pipeline_xlmr_50ep_10K_kabsch_sentence_mean"
+
+# run_variant() {
+#   local variant="$1"
+#   NEIGHBORHOOD_K="$NEIGHBORHOOD_K" \
+#     bash run_previous_pipeline_variant.sh "$variant"
+# }
+
+# if [[ -n "${XLMR_VARIANT:-}" ]]; then
+#   run_variant "$XLMR_VARIANT"
+#   exit 0
+# fi
+
+# for retrieval in "${RETRIEVALS[@]}"; do
+#   run_variant "${BASE_VARIANT}_${retrieval}_lora"
+# done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
 # Sentence-mean Kabsch clarification variants, evaluated on dev only.
 # The token-mean Kabsch variants are part of run_previous_pipeline_baselines.sh.
 
+PROJ_DIR="${PROJ_DIR:-results/models/reviewer_xlmr_50ep/checkpoint_final}"
+ALIGN_DIR="${ALIGN_DIR:-results/alignment/reviewer_xlmr_10K_50ep_train_fit}"
 NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+
 RETRIEVALS=(cosine csls margin_ratio)
 BASE_VARIANT="previous_pipeline_xlmr_50ep_10K_kabsch_sentence_mean"
 
+if [[ ! -f "$PROJ_DIR/training_manifest.json" ]]; then
+  echo "Missing reviewer-compliant checkpoint manifest:" >&2
+  echo "  $PROJ_DIR/training_manifest.json" >&2
+  echo "Set PROJ_DIR to the directory containing the verified checkpoint." >&2
+  exit 1
+fi
+
 run_variant() {
   local variant="$1"
+
+  PROJ_DIR="$PROJ_DIR" \
+  ALIGN_DIR="$ALIGN_DIR" \
+  REQUIRE_ALIGNMENT_MANIFEST=1 \
   NEIGHBORHOOD_K="$NEIGHBORHOOD_K" \
     bash run_previous_pipeline_variant.sh "$variant"
 }
@@ -200,4 +254,7 @@ fi
 for retrieval in "${RETRIEVALS[@]}"; do
   run_variant "${BASE_VARIANT}_${retrieval}_lora"
 done
+
+
+
 
