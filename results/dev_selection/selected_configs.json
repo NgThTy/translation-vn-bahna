@@ -237,5 +237,65 @@
       "--remove_punct",
       "--remove_spaces"
     ]
+  },
+  "off_the_shelf": {
+    "family": "off_the_shelf",
+    "configuration_name": "offtheshelf_labse_margin_ratio_strip_accents_no_punct",
+    "configuration": {
+      "model_name": "sentence-transformers/LaBSE",
+      "encoder_name": "labse",
+      "backend": "sentence_transformers",
+      "retrieval": "margin_ratio",
+      "lowercase": false,
+      "strip_accents": true,
+      "remove_punct": true,
+      "max_len": 256,
+      "neighborhood_k": 10,
+      "topk_eval": 10,
+      "eval_ks": [
+        1,
+        5,
+        10
+      ]
+    },
+    "development_metrics": {
+      "Top1_acc": 0.063,
+      "MRR": 0.0823,
+      "Recall@5": 0.1057
+    },
+    "selection_metric": "Top1_acc",
+    "tie_breakers": [
+      "MRR",
+      "Recall@5",
+      "configuration_name_ascending"
+    ],
+    "dev_metrics_path": "results/dev/off_the_shelf/offtheshelf_labse_margin_ratio_strip_accents_no_punct/metrics.json",
+    "evaluator_script": "src/multilingual_encoder_baseline.py",
+    "evaluation_cli_args": [
+      "--model_name",
+      "sentence-transformers/LaBSE",
+      "--encoder_name",
+      "labse",
+      "--backend",
+      "sentence_transformers",
+      "--batch_size",
+      "16",
+      "--max_len",
+      "256",
+      "--topk_eval",
+      "10",
+      "--eval_ks",
+      "1",
+      "5",
+      "10",
+      "--retrieval",
+      "margin_ratio",
+      "--neighborhood_k",
+      "10",
+      "--strip_accents",
+      "--remove_punct",
+      "--embedding_cache_dir",
+      "results/cache/off_the_shelf_embeddings"
+    ]
   }
 }
