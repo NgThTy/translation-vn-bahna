@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "fit_policy": "independent_training_lexicon_no_sentence_dev_or_test",
+  "fit_csv": "data/alignment_lexicon_fit.csv",
+  "fit_csv_sha256": "f36dc6a881ea0a94f53dd51d4d3d7cc74e0b0298e9e30b1071cd260f49ec59a2",
+  "alignment_sample_size": 7455,
+  "evaluation_csv": "data/alignment_lexicon_eval.csv",
+  "evaluation_csv_sha256": "c94cca0d32613659d909cf238e6500afa4a05656465c702f946eb676dc47b89b",
+  "evaluation_sample_size": 828,
+  "sampling_seed": 42,
+  "src_model": "xlm-roberta-base",
+  "tgt_model": "xlm-roberta-base",
+  "projection_checkpoint": "results/models/reviewer_xlmr_50ep/checkpoint_final",
+  "checkpoint_manifest": "results/models/reviewer_xlmr_50ep/checkpoint_final/training_manifest.json",
+  "checkpoint_manifest_sha256": "462203b21cd2bdcd80ffe2845a5b52d15313d6c1a8d000ac9ddee60e76d7af0b",
+  "use_lora": true,
+  "R_sha256": "9307e87763a8d22886b7f386da08239da4e86541d8b0854ba2ce519b108c4341",
+  "t_sha256": "88b91383d303ee437b02474bd9b0c8dd42eb29edbfd5930a29153a13b4e4a899"
+}
