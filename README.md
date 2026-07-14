@@ -1374,3 +1374,66 @@ HYBRID_ACTION=test bash run_hybrid_rerank.sh
 
 No model retraining is required for this patch. It recomputes retrieval scores
 and reranking results from the existing selected embeddings and IBM1 artifacts.
+
+# Full-encoder reviewer-compliant runner update
+
+This patch updates `run_full_encoder_contrastive_baselines.sh` so that:
+
+- training/dev evaluation does not require `data/test.csv`;
+- six configurations are trained on `data/train_fit.csv`;
+- checkpoints are saved at epochs 3, 5, and 10;
+- cosine, CSLS, and ratio-margin are evaluated on development data;
+- missing development outputs can be recovered from saved checkpoints without retraining;
+- development selection and final test evaluation are separate actions.
+
+## Install
+
+```bash
+cp run_full_encoder_contrastive_baselines.sh /path/to/repo/
+chmod +x /path/to/repo/run_full_encoder_contrastive_baselines.sh
+bash -n /path/to/repo/run_full_encoder_contrastive_baselines.sh
+```
+
+## Train or resume one configuration
+
+```bash
+FULL_ENCODER_CONFIG=sent_mlp256_sym_t007_lr1e5 \
+  bash run_full_encoder_contrastive_baselines.sh
+```
+
+## Train/resume by array index
+
+```bash
+FULL_ENCODER_INDEX=0 bash run_full_encoder_contrastive_baselines.sh
+```
+
+Valid indices are `0` through `5`.
+
+## Recover missing dev evaluations from existing checkpoints
+
+```bash
+FULL_ENCODER_ACTION=dev_eval_existing \
+  bash run_full_encoder_contrastive_baselines.sh
+```
+
+## Select on development only
+
+```bash
+FULL_ENCODER_ACTION=select \
+  bash run_full_encoder_contrastive_baselines.sh
+```
+
+## Evaluate the single selected configuration on test
+
+```bash
+FULL_ENCODER_ACTION=test \
+  bash run_full_encoder_contrastive_baselines.sh
+```
+
+## Expected artifacts
+
+- 18 checkpoint directories: six configurations x epochs 3/5/10.
+- 54 development `metrics.json` files: six configurations x three epochs x three criteria.
+- Criterion counts: 18 cosine, 18 CSLS, and 18 ratio-margin.
+
+The existing `src/select_dev_configs_and_evaluate_test.py` already stores and reuses each winner's `evaluation_cli_args`, including `--retrieval margin_ratio --neighborhood_k 10`; no selector source change is required.

@@ -334,6 +334,201 @@
 
 
 
+# #!/usr/bin/env bash
+# set -euo pipefail
+
+# PYTHON_BIN="${PYTHON_BIN:-python}"
+# TRAIN_CSV="${TRAIN_CSV:-data/train_fit.csv}"
+# DEV_CSV="${DEV_CSV:-data/dev.csv}"
+# TEST_CSV="${TEST_CSV:-data/test.csv}"
+# MODEL_ROOT="${MODEL_ROOT:-results/models/full_encoder}"
+# DEV_ROOT="${DEV_ROOT:-results/dev/full_encoder}"
+# TEST_ROOT="${TEST_ROOT:-results/test/full_encoder}"
+# SELECTION_ROOT="${SELECTION_ROOT:-results/dev_selection}"
+# MAX_RUNTIME_MINUTES="${MAX_RUNTIME_MINUTES:-105}"
+# NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+# RETRIEVALS=(cosine csls margin_ratio)
+
+# for required in "$TRAIN_CSV" "$DEV_CSV" "$TEST_CSV"; do
+#   if [[ ! -f "$required" ]]; then
+#     echo "Missing required file: $required" >&2
+#     exit 1
+#   fi
+# done
+
+# mkdir -p "$MODEL_ROOT" "$DEV_ROOT" "$TEST_ROOT" "$SELECTION_ROOT" logs
+
+# # Six declared training configurations. Each run is trained to epoch 10 and
+# # creates nine development variants: epochs 3/5/10 x cosine/CSLS/ratio-margin.
+# CONFIG_NAMES=(
+#   "sent_mlp256_sym_t007_lr1e5"
+#   "token_mlp256_sym_t007_lr1e5"
+#   "sent_linear256_sym_t007_lr1e5"
+#   "token_identity_sym_t007_lr1e5"
+#   "token_mlp256_sym_t005_lr1e5"
+#   "token_mlp128_oneway_t007_lr5e6"
+# )
+
+# config_args() {
+#   case "$1" in
+#     sent_mlp256_sym_t007_lr1e5)
+#       printf '%s\n' --pooling sentence_mean --projection_type mlp --projection_dim 256 --loss_type symmetric_infonce --temperature 0.07 --lr 1e-5
+#       ;;
+#     token_mlp256_sym_t007_lr1e5)
+#       printf '%s\n' --pooling token_mean --projection_type mlp --projection_dim 256 --loss_type symmetric_infonce --temperature 0.07 --lr 1e-5
+#       ;;
+#     sent_linear256_sym_t007_lr1e5)
+#       printf '%s\n' --pooling sentence_mean --projection_type linear --projection_dim 256 --loss_type symmetric_infonce --temperature 0.07 --lr 1e-5
+#       ;;
+#     token_identity_sym_t007_lr1e5)
+#       printf '%s\n' --pooling token_mean --projection_type identity --projection_dim 768 --loss_type symmetric_infonce --temperature 0.07 --lr 1e-5
+#       ;;
+#     token_mlp256_sym_t005_lr1e5)
+#       printf '%s\n' --pooling token_mean --projection_type mlp --projection_dim 256 --loss_type symmetric_infonce --temperature 0.05 --lr 1e-5
+#       ;;
+#     token_mlp128_oneway_t007_lr5e6)
+#       printf '%s\n' --pooling token_mean --projection_type mlp --projection_dim 128 --loss_type source_to_target_infonce --temperature 0.07 --lr 5e-6
+#       ;;
+#     *)
+#       echo "Unknown full-encoder configuration: $1" >&2
+#       exit 1
+#       ;;
+#   esac
+# }
+
+# variant_complete() {
+#   local prefix="$1"
+#   local epoch retrieval
+#   for epoch in 3 5 10; do
+#     for retrieval in "${RETRIEVALS[@]}"; do
+#       if [[ ! -s "$DEV_ROOT/${prefix}_${epoch}ep_${retrieval}/metrics.json" ]]; then
+#         return 1
+#       fi
+#     done
+#   done
+#   return 0
+# }
+
+# run_config() {
+#   local name="$1"
+#   if variant_complete "$name"; then
+#     echo "[SKIP] All nine dev variants already exist for $name"
+#     return 0
+#   fi
+
+#   mapfile -t EXTRA_ARGS < <(config_args "$name")
+#   echo "[RUN/RESUME] $name"
+#   "$PYTHON_BIN" src/full_encoder_contrastive_finetune_baseline.py \
+#     --mode train \
+#     --train_csv "$TRAIN_CSV" \
+#     --dev_csv "$DEV_CSV" \
+#     --output_dir "$MODEL_ROOT/$name" \
+#     --dev_output_root "$DEV_ROOT" \
+#     --configuration_prefix "$name" \
+#     --src_model xlm-roberta-base \
+#     --tgt_model xlm-roberta-base \
+#     --epochs 10 \
+#     --checkpoint_epochs 3 5 10 \
+#     --batch_size "${BATCH_SIZE:-4}" \
+#     --eval_batch_size "${EVAL_BATCH_SIZE:-16}" \
+#     --grad_accum_steps "${GRAD_ACCUM_STEPS:-16}" \
+#     --weight_decay 0.01 \
+#     --warmup_ratio 0.06 \
+#     --proj_dropout 0.1 \
+#     --src_max_len 256 \
+#     --tgt_max_len 256 \
+#     --eval_retrievals all \
+#     --neighborhood_k "$NEIGHBORHOOD_K" \
+#     --topk_eval 10 \
+#     --eval_ks 1 5 10 \
+#     --bf16 \
+#     --auto_resume \
+#     --save_every_steps "${SAVE_EVERY_STEPS:-200}" \
+#     --max_runtime_minutes "$MAX_RUNTIME_MINUTES" \
+#     "${EXTRA_ARGS[@]}"
+# }
+
+# select_and_test() {
+#   local missing=0 prefix
+#   for prefix in "${CONFIG_NAMES[@]}"; do
+#     if ! variant_complete "$prefix"; then
+#       echo "Missing dev results for: $prefix" >&2
+#       missing=1
+#     fi
+#   done
+#   if [[ "$missing" -ne 0 ]]; then
+#     echo "Refusing selection from an incomplete full-encoder search space." >&2
+#     exit 2
+#   fi
+
+#   "$PYTHON_BIN" src/select_dev_configs_and_evaluate_test.py \
+#     --dev_root results/dev \
+#     --test_root results/test \
+#     --output_root "$SELECTION_ROOT" \
+#     --test_csv "$TEST_CSV" \
+#     --evaluate_test \
+#     --family full_encoder
+# }
+
+# ACTION="${FULL_ENCODER_ACTION:-train}"
+# if [[ "$ACTION" == "select" ]]; then
+#   select_and_test
+#   exit 0
+# fi
+
+# if [[ -n "${FULL_ENCODER_CONFIG:-}" ]]; then
+#   run_config "$FULL_ENCODER_CONFIG"
+#   exit 0
+# fi
+
+# if [[ -n "${FULL_ENCODER_INDEX:-}" ]]; then
+#   if ! [[ "$FULL_ENCODER_INDEX" =~ ^[0-9]+$ ]]; then
+#     echo "FULL_ENCODER_INDEX must be an integer" >&2
+#     exit 1
+#   fi
+#   if (( FULL_ENCODER_INDEX < 0 || FULL_ENCODER_INDEX >= ${#CONFIG_NAMES[@]} )); then
+#     echo "FULL_ENCODER_INDEX is out of range: $FULL_ENCODER_INDEX" >&2
+#     exit 1
+#   fi
+#   run_config "${CONFIG_NAMES[$FULL_ENCODER_INDEX]}"
+#   exit 0
+# fi
+
+# if [[ "${FULL_ENCODER_RUN_ALL:-0}" == "1" ]]; then
+#   for name in "${CONFIG_NAMES[@]}"; do
+#     run_config "$name"
+#   done
+#   exit 0
+# fi
+
+# # Safe default for a two-hour allocation: run or resume only the first
+# # incomplete training configuration, then stop.
+# for name in "${CONFIG_NAMES[@]}"; do
+#   if ! variant_complete "$name"; then
+#     run_config "$name"
+#     exit 0
+#   fi
+# done
+
+# echo "All full-encoder development variants are complete."
+# echo "Run: FULL_ENCODER_ACTION=select bash run_full_encoder_contrastive_baselines.sh"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -348,18 +543,21 @@ SELECTION_ROOT="${SELECTION_ROOT:-results/dev_selection}"
 MAX_RUNTIME_MINUTES="${MAX_RUNTIME_MINUTES:-105}"
 NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
 RETRIEVALS=(cosine csls margin_ratio)
+CHECKPOINT_EPOCHS=(3 5 10)
 
-for required in "$TRAIN_CSV" "$DEV_CSV" "$TEST_CSV"; do
+# Training and development evaluation must not depend on the held-out test set.
+for required in "$TRAIN_CSV" "$DEV_CSV"; do
   if [[ ! -f "$required" ]]; then
     echo "Missing required file: $required" >&2
     exit 1
   fi
 done
 
-mkdir -p "$MODEL_ROOT" "$DEV_ROOT" "$TEST_ROOT" "$SELECTION_ROOT" logs
+mkdir -p "$MODEL_ROOT" "$DEV_ROOT" "$SELECTION_ROOT" logs
 
-# Six declared training configurations. Each run is trained to epoch 10 and
-# creates nine development variants: epochs 3/5/10 x cosine/CSLS/ratio-margin.
+# Six declared training configurations. Each configuration is trained once to
+# epoch 10 and contributes nine development variants:
+# epochs 3/5/10 x cosine/CSLS/ratio-margin.
 CONFIG_NAMES=(
   "sent_mlp256_sym_t007_lr1e5"
   "token_mlp256_sym_t007_lr1e5"
@@ -372,22 +570,58 @@ CONFIG_NAMES=(
 config_args() {
   case "$1" in
     sent_mlp256_sym_t007_lr1e5)
-      printf '%s\n' --pooling sentence_mean --projection_type mlp --projection_dim 256 --loss_type symmetric_infonce --temperature 0.07 --lr 1e-5
+      printf '%s\n' \
+        --pooling sentence_mean \
+        --projection_type mlp \
+        --projection_dim 256 \
+        --loss_type symmetric_infonce \
+        --temperature 0.07 \
+        --lr 1e-5
       ;;
     token_mlp256_sym_t007_lr1e5)
-      printf '%s\n' --pooling token_mean --projection_type mlp --projection_dim 256 --loss_type symmetric_infonce --temperature 0.07 --lr 1e-5
+      printf '%s\n' \
+        --pooling token_mean \
+        --projection_type mlp \
+        --projection_dim 256 \
+        --loss_type symmetric_infonce \
+        --temperature 0.07 \
+        --lr 1e-5
       ;;
     sent_linear256_sym_t007_lr1e5)
-      printf '%s\n' --pooling sentence_mean --projection_type linear --projection_dim 256 --loss_type symmetric_infonce --temperature 0.07 --lr 1e-5
+      printf '%s\n' \
+        --pooling sentence_mean \
+        --projection_type linear \
+        --projection_dim 256 \
+        --loss_type symmetric_infonce \
+        --temperature 0.07 \
+        --lr 1e-5
       ;;
     token_identity_sym_t007_lr1e5)
-      printf '%s\n' --pooling token_mean --projection_type identity --projection_dim 768 --loss_type symmetric_infonce --temperature 0.07 --lr 1e-5
+      printf '%s\n' \
+        --pooling token_mean \
+        --projection_type identity \
+        --projection_dim 768 \
+        --loss_type symmetric_infonce \
+        --temperature 0.07 \
+        --lr 1e-5
       ;;
     token_mlp256_sym_t005_lr1e5)
-      printf '%s\n' --pooling token_mean --projection_type mlp --projection_dim 256 --loss_type symmetric_infonce --temperature 0.05 --lr 1e-5
+      printf '%s\n' \
+        --pooling token_mean \
+        --projection_type mlp \
+        --projection_dim 256 \
+        --loss_type symmetric_infonce \
+        --temperature 0.05 \
+        --lr 1e-5
       ;;
     token_mlp128_oneway_t007_lr5e6)
-      printf '%s\n' --pooling token_mean --projection_type mlp --projection_dim 128 --loss_type source_to_target_infonce --temperature 0.07 --lr 5e-6
+      printf '%s\n' \
+        --pooling token_mean \
+        --projection_type mlp \
+        --projection_dim 128 \
+        --loss_type source_to_target_infonce \
+        --temperature 0.07 \
+        --lr 5e-6
       ;;
     *)
       echo "Unknown full-encoder configuration: $1" >&2
@@ -399,25 +633,119 @@ config_args() {
 variant_complete() {
   local prefix="$1"
   local epoch retrieval
-  for epoch in 3 5 10; do
+
+  for epoch in "${CHECKPOINT_EPOCHS[@]}"; do
     for retrieval in "${RETRIEVALS[@]}"; do
       if [[ ! -s "$DEV_ROOT/${prefix}_${epoch}ep_${retrieval}/metrics.json" ]]; then
         return 1
       fi
     done
   done
+
   return 0
+}
+
+checkpoint_complete() {
+  local prefix="$1"
+  local epoch="$2"
+  local checkpoint_dir="$MODEL_ROOT/$prefix/checkpoint_epoch_$epoch"
+
+  [[ -f "$checkpoint_dir/checkpoint_metadata.json" ]] &&
+  [[ -d "$checkpoint_dir/src_encoder" ]] &&
+  [[ -d "$checkpoint_dir/tgt_encoder" ]] &&
+  [[ -f "$checkpoint_dir/src_projection.pt" ]] &&
+  [[ -f "$checkpoint_dir/tgt_projection.pt" ]]
+}
+
+checkpoint_set_complete() {
+  local prefix="$1"
+  local epoch
+
+  for epoch in "${CHECKPOINT_EPOCHS[@]}"; do
+    if ! checkpoint_complete "$prefix" "$epoch"; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
+evaluate_existing_config() {
+  local name="$1"
+  local epoch retrieval
+  local checkpoint_dir configuration_name output_dir metrics_file
+  local -a extra_args=()
+
+  while IFS= read -r argument; do
+    extra_args+=("$argument")
+  done < <(config_args "$name")
+
+  for epoch in "${CHECKPOINT_EPOCHS[@]}"; do
+    checkpoint_dir="$MODEL_ROOT/$name/checkpoint_epoch_$epoch"
+
+    if ! checkpoint_complete "$name" "$epoch"; then
+      echo "Missing or incomplete checkpoint: $checkpoint_dir" >&2
+      return 1
+    fi
+
+    for retrieval in "${RETRIEVALS[@]}"; do
+      configuration_name="${name}_${epoch}ep_${retrieval}"
+      output_dir="$DEV_ROOT/$configuration_name"
+      metrics_file="$output_dir/metrics.json"
+
+      if [[ -s "$metrics_file" ]]; then
+        echo "[SKIP] Existing dev result: $configuration_name"
+        continue
+      fi
+
+      if [[ -d "$output_dir" ]]; then
+        echo "[CLEAN] Removing incomplete result: $output_dir"
+        rm -rf "$output_dir"
+      fi
+
+      echo "[DEV EVAL] $configuration_name"
+
+      "$PYTHON_BIN" src/full_encoder_contrastive_finetune_baseline.py \
+        --mode evaluate \
+        --input_csv "$DEV_CSV" \
+        --split_name dev \
+        --checkpoint_dir "$checkpoint_dir" \
+        --configuration_name "$configuration_name" \
+        --output_dir "$output_dir" \
+        --retrieval "$retrieval" \
+        --neighborhood_k "$NEIGHBORHOOD_K" \
+        --eval_batch_size "${EVAL_BATCH_SIZE:-16}" \
+        --topk_eval 10 \
+        --eval_ks 1 5 10 \
+        --bf16 \
+        "${extra_args[@]}"
+    done
+  done
 }
 
 run_config() {
   local name="$1"
+  local -a extra_args=()
+
   if variant_complete "$name"; then
     echo "[SKIP] All nine dev variants already exist for $name"
     return 0
   fi
 
-  mapfile -t EXTRA_ARGS < <(config_args "$name")
-  echo "[RUN/RESUME] $name"
+  # When all declared checkpoints exist, recover any missing dev evaluations
+  # without re-entering training mode.
+  if checkpoint_set_complete "$name"; then
+    echo "[DEV EVAL] Complete checkpoints found for $name"
+    evaluate_existing_config "$name"
+    return 0
+  fi
+
+  while IFS= read -r argument; do
+    extra_args+=("$argument")
+  done < <(config_args "$name")
+
+  echo "[TRAIN/RESUME] $name"
+
   "$PYTHON_BIN" src/full_encoder_contrastive_finetune_baseline.py \
     --mode train \
     --train_csv "$TRAIN_CSV" \
@@ -428,7 +756,7 @@ run_config() {
     --src_model xlm-roberta-base \
     --tgt_model xlm-roberta-base \
     --epochs 10 \
-    --checkpoint_epochs 3 5 10 \
+    --checkpoint_epochs "${CHECKPOINT_EPOCHS[@]}" \
     --batch_size "${BATCH_SIZE:-4}" \
     --eval_batch_size "${EVAL_BATCH_SIZE:-16}" \
     --grad_accum_steps "${GRAD_ACCUM_STEPS:-16}" \
@@ -445,21 +773,74 @@ run_config() {
     --auto_resume \
     --save_every_steps "${SAVE_EVERY_STEPS:-200}" \
     --max_runtime_minutes "$MAX_RUNTIME_MINUTES" \
-    "${EXTRA_ARGS[@]}"
+    "${extra_args[@]}"
+
+  # The runtime limit may interrupt training before epoch 10. Once all declared
+  # checkpoints exist, fill any missing cosine/CSLS/ratio-margin dev results.
+  if checkpoint_set_complete "$name"; then
+    evaluate_existing_config "$name"
+  else
+    echo "[INCOMPLETE] $name has not reached all declared checkpoints."
+    echo "Run the same configuration again to resume."
+  fi
 }
 
-select_and_test() {
-  local missing=0 prefix
+require_complete_search_space() {
+  local missing=0
+  local prefix
+
   for prefix in "${CONFIG_NAMES[@]}"; do
     if ! variant_complete "$prefix"; then
       echo "Missing dev results for: $prefix" >&2
       missing=1
     fi
   done
+
   if [[ "$missing" -ne 0 ]]; then
     echo "Refusing selection from an incomplete full-encoder search space." >&2
     exit 2
   fi
+}
+
+select_only() {
+  require_complete_search_space
+
+  "$PYTHON_BIN" src/select_dev_configs_and_evaluate_test.py \
+    --dev_root results/dev \
+    --test_root results/test \
+    --output_root "$SELECTION_ROOT" \
+    --test_csv "$TEST_CSV"
+
+  echo
+  echo "Selected full-encoder configuration:"
+
+  "$PYTHON_BIN" - <<'PY'
+import json
+from pathlib import Path
+
+manifest_path = Path("results/dev_selection/selected_configs.json")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+selected = manifest["full_encoder"]
+print(json.dumps(selected, ensure_ascii=False, indent=2))
+PY
+}
+
+test_selected() {
+  require_complete_search_space
+
+  if [[ ! -f "$TEST_CSV" ]]; then
+    echo "Missing held-out test file: $TEST_CSV" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$SELECTION_ROOT/selected_configs.json" ]]; then
+    echo "Selection manifest is missing." >&2
+    echo "Run FULL_ENCODER_ACTION=select first." >&2
+    exit 1
+  fi
+
+  rm -rf "$TEST_ROOT"
+  mkdir -p "$TEST_ROOT"
 
   "$PYTHON_BIN" src/select_dev_configs_and_evaluate_test.py \
     --dev_root results/dev \
@@ -471,10 +852,34 @@ select_and_test() {
 }
 
 ACTION="${FULL_ENCODER_ACTION:-train}"
-if [[ "$ACTION" == "select" ]]; then
-  select_and_test
-  exit 0
-fi
+
+case "$ACTION" in
+  train)
+    ;;
+  dev_eval_existing)
+    if [[ -n "${FULL_ENCODER_CONFIG:-}" ]]; then
+      evaluate_existing_config "$FULL_ENCODER_CONFIG"
+    else
+      for name in "${CONFIG_NAMES[@]}"; do
+        evaluate_existing_config "$name"
+      done
+    fi
+    exit 0
+    ;;
+  select)
+    select_only
+    exit 0
+    ;;
+  test)
+    test_selected
+    exit 0
+    ;;
+  *)
+    echo "Unknown FULL_ENCODER_ACTION: $ACTION" >&2
+    echo "Expected: train, dev_eval_existing, select, or test" >&2
+    exit 2
+    ;;
+esac
 
 if [[ -n "${FULL_ENCODER_CONFIG:-}" ]]; then
   run_config "$FULL_ENCODER_CONFIG"
@@ -501,8 +906,8 @@ if [[ "${FULL_ENCODER_RUN_ALL:-0}" == "1" ]]; then
   exit 0
 fi
 
-# Safe default for a two-hour allocation: run or resume only the first
-# incomplete training configuration, then stop.
+# Safe default for a short allocation: train/resume only the first incomplete
+# configuration, then stop.
 for name in "${CONFIG_NAMES[@]}"; do
   if ! variant_complete "$name"; then
     run_config "$name"
@@ -512,3 +917,4 @@ done
 
 echo "All full-encoder development variants are complete."
 echo "Run: FULL_ENCODER_ACTION=select bash run_full_encoder_contrastive_baselines.sh"
+echo "Then: FULL_ENCODER_ACTION=test bash run_full_encoder_contrastive_baselines.sh"
