@@ -97,21 +97,69 @@
 # echo
 # echo "Finished Baseline 6 token-level Kabsch experiments."
 
+# #!/usr/bin/env bash
+# set -euo pipefail
+
+# # Token-level Kabsch variants, evaluated on dev only.
+
+# if [[ -n "${XLMR_VARIANT:-}" ]]; then
+#   bash run_previous_pipeline_variant.sh "$XLMR_VARIANT"
+#   exit 0
+# fi
+
+# variants=(
+#   previous_pipeline_xlmr_50ep_10K_token_kabsch_token_mean_csls_lora
+#   previous_pipeline_xlmr_50ep_10K_token_kabsch_token_idf_csls_lora
+# )
+
+# for variant in "${variants[@]}"; do
+#   bash run_previous_pipeline_variant.sh "$variant"
+# done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Token-level Kabsch variants, evaluated on dev only.
+# Token-level Kabsch variants, evaluated on dev only. The previous script ran
+# only CSLS; this version makes the reviewer-requested controlled comparison
+# against cosine and ratio margin as well.
+
+NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+RETRIEVALS=(cosine csls margin_ratio)
+BASE_VARIANTS=(
+  previous_pipeline_xlmr_50ep_10K_token_kabsch_token_mean
+  previous_pipeline_xlmr_50ep_10K_token_kabsch_token_idf
+)
+
+run_variant() {
+  local variant="$1"
+  NEIGHBORHOOD_K="$NEIGHBORHOOD_K" \
+    bash run_previous_pipeline_variant.sh "$variant"
+}
 
 if [[ -n "${XLMR_VARIANT:-}" ]]; then
-  bash run_previous_pipeline_variant.sh "$XLMR_VARIANT"
+  run_variant "$XLMR_VARIANT"
   exit 0
 fi
 
-variants=(
-  previous_pipeline_xlmr_50ep_10K_token_kabsch_token_mean_csls_lora
-  previous_pipeline_xlmr_50ep_10K_token_kabsch_token_idf_csls_lora
-)
-
-for variant in "${variants[@]}"; do
-  bash run_previous_pipeline_variant.sh "$variant"
+for base_variant in "${BASE_VARIANTS[@]}"; do
+  for retrieval in "${RETRIEVALS[@]}"; do
+    run_variant "${base_variant}_${retrieval}_lora"
+  done
 done

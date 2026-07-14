@@ -137,23 +137,67 @@
 # echo "Finished Baseline 6 clarification experiments."
 
 #####################
+# #!/usr/bin/env bash
+# set -euo pipefail
+
+# # Sentence-mean Kabsch clarification variants, evaluated on dev only.
+# # The token-mean Kabsch variants are already part of run_previous_pipeline_baselines.sh
+# # and are intentionally not duplicated here.
+
+# if [[ -n "${XLMR_VARIANT:-}" ]]; then
+#   bash run_previous_pipeline_variant.sh "$XLMR_VARIANT"
+#   exit 0
+# fi
+
+# variants=(
+#   previous_pipeline_xlmr_50ep_10K_kabsch_sentence_mean_cosine_lora
+#   previous_pipeline_xlmr_50ep_10K_kabsch_sentence_mean_csls_lora
+# )
+
+# for variant in "${variants[@]}"; do
+#   bash run_previous_pipeline_variant.sh "$variant"
+# done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
 # Sentence-mean Kabsch clarification variants, evaluated on dev only.
-# The token-mean Kabsch variants are already part of run_previous_pipeline_baselines.sh
-# and are intentionally not duplicated here.
+# The token-mean Kabsch variants are part of run_previous_pipeline_baselines.sh.
+
+NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+RETRIEVALS=(cosine csls margin_ratio)
+BASE_VARIANT="previous_pipeline_xlmr_50ep_10K_kabsch_sentence_mean"
+
+run_variant() {
+  local variant="$1"
+  NEIGHBORHOOD_K="$NEIGHBORHOOD_K" \
+    bash run_previous_pipeline_variant.sh "$variant"
+}
 
 if [[ -n "${XLMR_VARIANT:-}" ]]; then
-  bash run_previous_pipeline_variant.sh "$XLMR_VARIANT"
+  run_variant "$XLMR_VARIANT"
   exit 0
 fi
 
-variants=(
-  previous_pipeline_xlmr_50ep_10K_kabsch_sentence_mean_cosine_lora
-  previous_pipeline_xlmr_50ep_10K_kabsch_sentence_mean_csls_lora
-)
-
-for variant in "${variants[@]}"; do
-  bash run_previous_pipeline_variant.sh "$variant"
+for retrieval in "${RETRIEVALS[@]}"; do
+  run_variant "${BASE_VARIANT}_${retrieval}_lora"
 done
+

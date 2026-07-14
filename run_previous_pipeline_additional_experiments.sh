@@ -127,23 +127,71 @@
 # echo "Finished Baseline 6 additional no-Kabsch pooling experiments."
 
 ##############################
+# #!/usr/bin/env bash
+# set -euo pipefail
+
+# # Additional no-Kabsch pooling variants, evaluated on dev only.
+
+# if [[ -n "${XLMR_VARIANT:-}" ]]; then
+#   bash run_previous_pipeline_variant.sh "$XLMR_VARIANT"
+#   exit 0
+# fi
+
+# variants=(
+#   previous_pipeline_xlmr_50ep_no_kabsch_token_idf_cosine_lora
+#   previous_pipeline_xlmr_50ep_no_kabsch_token_idf_csls_lora
+#   previous_pipeline_xlmr_50ep_no_kabsch_sentence_mean_cosine_lora
+#   previous_pipeline_xlmr_50ep_no_kabsch_sentence_mean_csls_lora
+# )
+
+# for variant in "${variants[@]}"; do
+#   bash run_previous_pipeline_variant.sh "$variant"
+# done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Additional no-Kabsch pooling variants, evaluated on dev only.
+# Additional no-Kabsch pooling variants, evaluated on dev only. Each fixed
+# model/pooling setup is compared with cosine, CSLS, and ratio margin.
+
+NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+RETRIEVALS=(cosine csls margin_ratio)
+BASE_VARIANTS=(
+  previous_pipeline_xlmr_50ep_no_kabsch_token_idf
+  previous_pipeline_xlmr_50ep_no_kabsch_sentence_mean
+)
+
+run_variant() {
+  local variant="$1"
+  NEIGHBORHOOD_K="$NEIGHBORHOOD_K" \
+    bash run_previous_pipeline_variant.sh "$variant"
+}
 
 if [[ -n "${XLMR_VARIANT:-}" ]]; then
-  bash run_previous_pipeline_variant.sh "$XLMR_VARIANT"
+  run_variant "$XLMR_VARIANT"
   exit 0
 fi
 
-variants=(
-  previous_pipeline_xlmr_50ep_no_kabsch_token_idf_cosine_lora
-  previous_pipeline_xlmr_50ep_no_kabsch_token_idf_csls_lora
-  previous_pipeline_xlmr_50ep_no_kabsch_sentence_mean_cosine_lora
-  previous_pipeline_xlmr_50ep_no_kabsch_sentence_mean_csls_lora
-)
-
-for variant in "${variants[@]}"; do
-  bash run_previous_pipeline_variant.sh "$variant"
+for base_variant in "${BASE_VARIANTS[@]}"; do
+  for retrieval in "${RETRIEVALS[@]}"; do
+    run_variant "${base_variant}_${retrieval}_lora"
+  done
 done

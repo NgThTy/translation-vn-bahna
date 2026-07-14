@@ -1196,3 +1196,181 @@ Add both directories to `.gitignore` when caches should not be versioned.
 > data, followed by one evaluation of the selected pipeline on the held-out test
 > set.
 
+# Margin-ratio scoring patch
+
+This patch adds Artetxe-Schwenk ratio-margin retrieval alongside cosine and
+CSLS for the active single-vector retrieval families. Modern dense retrieval is
+not included.
+
+## Complete Python replacements
+
+- `src/retrieval_scoring.py` (new shared scoring implementation)
+- `src/fasttext_procrustes_baseline.py`
+- `src/multilingual_encoder_baseline.py`
+- `src/previous_pipeline_baseline.py`
+- `src/full_encoder_contrastive_finetune_baseline.py`
+
+The shared scorer computes neighborhood statistics from the complete
+source-target score matrix before top-k truncation.
+
+## New command-line interface
+
+Use these options for new development runs:
+
+```bash
+--retrieval cosine|csls|margin_ratio
+--neighborhood_k 10
+```
+
+The old `--use_csls` and `--csls_k` options remain as deprecated aliases in the
+three legacy evaluators, so old commands do not immediately break. New result
+manifests use only `retrieval` and `neighborhood_k`.
+
+For the full-encoder training command, the default is now:
+
+```bash
+--eval_retrievals all
+```
+
+This evaluates `cosine`, `csls`, and `margin_ratio` for each declared checkpoint.
+The legacy value `both` still means only cosine and CSLS.
+
+## Runner changes still required
+
+The current shell runners were not supplied, so this archive does not overwrite
+them. Update every active development grid that currently loops over cosine and
+CSLS:
+
+```bash
+for retrieval in cosine csls margin_ratio; do
+    configuration_name="..._${retrieval}"
+    output_dir="results/dev/<family>/${configuration_name}"
+
+    python src/<evaluator>.py \
+        --input_csv data/dev.csv \
+        --split_name dev \
+        --retrieval "$retrieval" \
+        --neighborhood_k 10 \
+        --configuration_name "$configuration_name" \
+        --output_dir "$output_dir" \
+        ...
+done
+```
+
+Update at least:
+
+- `run_fasttext_procrustes_baselines.sh`
+- `run_off_the_shelf_encoder_baselines.sh`
+- `run_previous_pipeline_baselines.sh`
+- `run_full_encoder_contrastive_baselines.sh` only if it explicitly passes
+  `--eval_retrievals both`; change that value to `all`.
+- any additional XLM-R LoRA runner that explicitly creates only cosine and CSLS
+  variants.
+
+Do not add modern-dense runners while that experiment is postponed.
+
+## Install
+
+From the extracted patch directory:
+
+```bash
+bash install_margin_scoring_patch.sh /path/to/translation-vn-bahna
+```
+
+The installer backs up existing target files under a timestamped directory in
+the project root before replacing them.
+
+## Validate
+
+```bash
+python -m py_compile \
+  src/retrieval_scoring.py \
+  src/fasttext_procrustes_baseline.py \
+  src/multilingual_encoder_baseline.py \
+  src/previous_pipeline_baseline.py \
+  src/full_encoder_contrastive_finetune_baseline.py
+```
+
+Check the new options:
+
+```bash
+python src/fasttext_procrustes_baseline.py --help | grep -E 'retrieval|neighborhood'
+python src/multilingual_encoder_baseline.py --help | grep -E 'retrieval|neighborhood'
+python src/previous_pipeline_baseline.py --help | grep -E 'retrieval|neighborhood'
+python src/full_encoder_contrastive_finetune_baseline.py --help | grep -E 'retrieval|neighborhood'
+```
+
+## Experiment sequence
+
+1. Run all cosine, CSLS, and ratio-margin configurations on `data/dev.csv`.
+2. Rebuild `results/dev_selection/selected_configs.json`.
+3. Evaluate only the selected configuration per family on `data/test.csv`.
+4. Check the development-selected XLM-R LoRA criterion.
+5. If the XLM-R winner changes, rerun hybrid development selection and then one
+   selected hybrid test evaluation.
+
+
+# Hybrid ratio-margin integration
+
+This patch updates the hybrid reranker so it accepts an XLM-R LoRA component
+selected with any of the three reviewer-requested criteria:
+
+- `cosine`
+- `csls`
+- `margin_ratio`
+
+## Files
+
+- `src/retrieval_scoring.py`
+- `src/hybrid_lexical_neural_rerank.py`
+
+## Main behavior
+
+1. The hybrid reads the neural criterion from the selected
+   `xlmr_lora_projection` configuration in `selected_configs.json`.
+2. `neighborhood_k` is used for CSLS and ratio margin. `csls_k` remains a
+   backward-compatible fallback for older artifacts.
+3. The full neural score matrix is computed through the shared scoring module
+   over the complete evaluation pool, not over the candidate top-k list.
+4. Ratio margin is supported for both stage orders:
+   - neural-first uses the selected neural prediction artifact;
+   - IBM1-first scores IBM1 candidates using the full ratio-margin matrix.
+5. Neural criterion and neighborhood size are recorded in hybrid metrics and
+   the hybrid search manifest.
+
+## Install
+
+From the extracted patch directory:
+
+```bash
+bash install_hybrid_margin_ratio_patch.sh /path/to/translation-vn-bahna
+```
+
+The installer creates timestamped backups under
+`backups/hybrid_margin_ratio_<timestamp>/` and runs `py_compile`.
+
+## Required experiment order
+
+```bash
+# 1. Complete cosine/CSLS/margin-ratio XLM-R development variants.
+python src/select_dev_configs_and_evaluate_test.py \
+  --dev_root results/dev \
+  --test_root results/test \
+  --output_root results/dev_selection \
+  --test_csv data/test.csv
+
+# 2. Rebuild the hybrid development grid using the newly selected XLM-R component.
+HYBRID_ACTION=dev bash run_hybrid_rerank.sh
+
+# 3. Rebuild family selection, then evaluate only the selected hybrid on test.
+python src/select_dev_configs_and_evaluate_test.py \
+  --dev_root results/dev \
+  --test_root results/test \
+  --output_root results/dev_selection \
+  --test_csv data/test.csv
+
+HYBRID_ACTION=test bash run_hybrid_rerank.sh
+```
+
+No model retraining is required for this patch. It recomputes retrieval scores
+and reranking results from the existing selected embeddings and IBM1 artifacts.

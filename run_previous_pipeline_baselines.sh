@@ -171,28 +171,82 @@
 # echo "Finished Baseline 6 with LoRA-enabled previous pipeline."
 
 ##########################################
+# #!/usr/bin/env bash
+# set -euo pipefail
+
+# # Core six development variants. This script is resumable and never touches test.csv.
+# # Run one named variant with:
+# #   XLMR_VARIANT=previous_pipeline_xlmr_50ep_10K_kabsch_token_mean_csls_lora \
+# #     bash run_previous_pipeline_baselines.sh
+
+# if [[ -n "${XLMR_VARIANT:-}" ]]; then
+#   bash run_previous_pipeline_variant.sh "$XLMR_VARIANT"
+#   exit 0
+# fi
+
+# variants=(
+#   previous_pipeline_xlmr_50ep_10K_kabsch_token_mean_cosine_lora
+#   previous_pipeline_xlmr_50ep_10K_kabsch_token_mean_csls_lora
+#   previous_pipeline_xlmr_50ep_no_kabsch_token_mean_cosine_lora
+#   previous_pipeline_xlmr_50ep_no_kabsch_token_mean_csls_lora
+#   previous_pipeline_xlmr_50ep_10K_kabsch_token_idf_cosine_lora
+#   previous_pipeline_xlmr_50ep_10K_kabsch_token_idf_csls_lora
+# )
+
+# for variant in "${variants[@]}"; do
+#   bash run_previous_pipeline_variant.sh "$variant"
+# done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Core six development variants. This script is resumable and never touches test.csv.
+# Core development variants. Every fixed checkpoint/pooling/Kabsch setup is
+# compared under cosine, CSLS, and Artetxe-Schwenk ratio-margin retrieval.
+# This script remains dev-only and never touches test.csv.
+#
 # Run one named variant with:
-#   XLMR_VARIANT=previous_pipeline_xlmr_50ep_10K_kabsch_token_mean_csls_lora \
+#   XLMR_VARIANT=previous_pipeline_xlmr_50ep_10K_kabsch_token_mean_margin_ratio_lora \
 #     bash run_previous_pipeline_baselines.sh
 
+NEIGHBORHOOD_K="${NEIGHBORHOOD_K:-10}"
+RETRIEVALS=(cosine csls margin_ratio)
+BASE_VARIANTS=(
+  previous_pipeline_xlmr_50ep_10K_kabsch_token_mean
+  previous_pipeline_xlmr_50ep_no_kabsch_token_mean
+  previous_pipeline_xlmr_50ep_10K_kabsch_token_idf
+)
+
+run_variant() {
+  local variant="$1"
+  NEIGHBORHOOD_K="$NEIGHBORHOOD_K" \
+    bash run_previous_pipeline_variant.sh "$variant"
+}
+
 if [[ -n "${XLMR_VARIANT:-}" ]]; then
-  bash run_previous_pipeline_variant.sh "$XLMR_VARIANT"
+  run_variant "$XLMR_VARIANT"
   exit 0
 fi
 
-variants=(
-  previous_pipeline_xlmr_50ep_10K_kabsch_token_mean_cosine_lora
-  previous_pipeline_xlmr_50ep_10K_kabsch_token_mean_csls_lora
-  previous_pipeline_xlmr_50ep_no_kabsch_token_mean_cosine_lora
-  previous_pipeline_xlmr_50ep_no_kabsch_token_mean_csls_lora
-  previous_pipeline_xlmr_50ep_10K_kabsch_token_idf_cosine_lora
-  previous_pipeline_xlmr_50ep_10K_kabsch_token_idf_csls_lora
-)
-
-for variant in "${variants[@]}"; do
-  bash run_previous_pipeline_variant.sh "$variant"
+for base_variant in "${BASE_VARIANTS[@]}"; do
+  for retrieval in "${RETRIEVALS[@]}"; do
+    run_variant "${base_variant}_${retrieval}_lora"
+  done
 done
