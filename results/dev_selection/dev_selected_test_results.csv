@@ -1,9 +1,5 @@
 family,selected_configuration,development_accuracy_at_1,development_mrr,development_recall_at_5,test_accuracy_at_1,test_mrr,test_recall_at_5,test_metrics_path
 edit_distance,levenshtein_ratio_strip_accents,0.076049,0.092111,0.112437,0.424788,0.444711,0.470265,results/test/edit_distance/levenshtein_ratio_strip_accents/metrics.json
-fasttext_procrustes,fasttext_procrustes_phrase_mean_vecmap_csls_strip_accents_no_punct,0.190605,0.25803,0.351367,0.164418,0.212248,0.271864,results/test/fasttext_procrustes/fasttext_procrustes_phrase_mean_vecmap_csls_strip_accents_no_punct/metrics.json
-full_encoder,token_identity_sym_t007_lr1e5_10ep_csls,0.3003,0.374,0.4729,0.2224,0.2985,0.3968,results/test/full_encoder/token_identity_sym_t007_lr1e5_10ep_csls/metrics.json
-hybrid,hybrid_neural_first_k10_raw_minmax_weighted_sum_a0p25_b0p75_g0_lp0p1_dc003f4a17,0.6132,0.6673,0.7403,0.5157,0.5581,0.6182,results/test/hybrid/hybrid_neural_first_k10_raw_minmax_weighted_sum_a0p25_b0p75_g0_lp0p1_dc003f4a17/metrics.json
+fasttext_procrustes,fasttext_procrustes_phrase_mean_vecmap_margin_ratio_strip_accents_no_punct,0.191567,0.257509,0.348094,0.165417,0.211404,0.268866,results/test/fasttext_procrustes/fasttext_procrustes_phrase_mean_vecmap_margin_ratio_strip_accents_no_punct/metrics.json
 ibm1,ibm1_sym_strip_accents_no_punct_lenpen,0.408,0.4781,0.5741,0.4933,0.5459,0.6167,results/test/ibm1/ibm1_sym_strip_accents_no_punct_lenpen/metrics.json
 lexical,bm25_char_2_5_strip_accents_no_punct_no_spaces,0.063727,0.085519,0.114555,0.372314,0.400366,0.43928,results/test/lexical/bm25_char_2_5_strip_accents_no_punct_no_spaces/metrics.json
-off_the_shelf,offtheshelf_labse_csls_strip_accents_no_punct,0.063,0.0823,0.1074,0.2419,0.2735,0.3153,results/test/off_the_shelf/offtheshelf_labse_csls_strip_accents_no_punct/metrics.json
-xlmr_lora_projection,previous_pipeline_xlmr_50ep_no_kabsch_token_mean_csls_lora,0.5089,0.5922,0.7062,0.3633,0.4452,0.5507,results/test/xlmr_lora_projection/previous_pipeline_xlmr_50ep_no_kabsch_token_mean_csls_lora/metrics.json
