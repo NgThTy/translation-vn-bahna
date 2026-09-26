@@ -71,3 +71,6 @@ results/cache/
 
 # macOS temporary files
 .DS_Store
+
+# macOS metadata
+.DS_Store
