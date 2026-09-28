@@ -1,0 +1,36 @@
+{
+  "development": {
+    "DPR-XM": {
+      "checkpoint": "20 epochs",
+      "recall@1": 0.5766,
+      "recall@5": 0.7403,
+      "recall@10": 0.7869
+    },
+    "LAMIR": {
+      "checkpoint": "50 epochs",
+      "recall@1": 0.5381,
+      "recall@5": 0.7147,
+      "recall@10": 0.7711
+    },
+    "ColBERT-X": {
+      "checkpoint": "50000 steps",
+      "recall@1": 0.4471,
+      "recall@5": 0.5941,
+      "recall@10": 0.645
+    },
+    "ColBERT-XM": {
+      "checkpoint": "60000 steps",
+      "recall@1": 0.4224,
+      "recall@5": 0.5668,
+      "recall@10": 0.6136
+    }
+  },
+  "selected_method": "DPR-XM",
+  "test": {
+    "recall@1": 0.4743,
+    "recall@5": 0.6522,
+    "recall@10": 0.7221,
+    "mrr@10": 0.5506
+  },
+  "note": "The upstream DPR-XM evaluator computed reciprocal rank only within the top 10. Therefore 0.5506 is retained as MRR@10 and is not relabeled as full MRR."
+}

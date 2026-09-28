@@ -74,3 +74,14 @@ results/cache/
 
 # macOS metadata
 .DS_Store
+
+# Python/runtime temporary files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.env
+
+# Generated third-party Zhuang--Chinese transfer data
+data/other_low_resource_generalization/zhuang_chinese/train.csv
+data/other_low_resource_generalization/zhuang_chinese/test.csv
