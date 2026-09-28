@@ -669,7 +669,12 @@ A final BibTeX entry should be added after the paper metadata is finalized.
 
 ## License
 
-No software license is currently declared in this README. Add a `LICENSE` file before public release and update this section with the selected license.
+The original code in this repository is released under the MIT License.
+See `LICENSE` for details.
+
+Third-party code and data remain subject to their respective licenses and
+access conditions. See `SOURCE_PROVENANCE.md` and the license files included
+with imported components.
 
 ---
 
