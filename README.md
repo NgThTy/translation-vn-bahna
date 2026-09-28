@@ -1,8 +1,8 @@
-# Bahnar–Vietnamese Cross-Lingual Sentence Retrieval
+# Bahnar–Vietnamese Parallel-Sentence Retrieval
 
 Code, data splits, result artifacts, and camera-ready reproducibility materials for:
 
-> **Bahnar–Vietnamese Cross-Lingual Sentence Retrieval: A Low-Resource Case Study with Lexical, Neural, and Hybrid Methods**
+> **Bahnar–Vietnamese Parallel-Sentence Retrieval: A Low-Resource Case Study with Lexical, Neural, and Hybrid Methods**
 
 This repository studies **Bahnar–Vietnamese parallel-sentence retrieval (bitext retrieval)** as a controlled candidate-ranking task. Given a Bahnar query sentence, a system ranks Vietnamese candidates and should place the documented Vietnamese counterpart as high as possible.
 
@@ -523,7 +523,7 @@ If you use this repository, please cite the paper:
 
 ```bibtex
 @misc{bahnar_vietnamese_retrieval_2026,
-  title  = {Bahnar--Vietnamese Cross-Lingual Sentence Retrieval:
+  title  = {Bahnar--Vietnamese Parallel-Sentence Retrieval:
             A Low-Resource Case Study with Lexical, Neural, and Hybrid Methods},
   year   = {2026},
   note   = {Camera-ready code and data release:
